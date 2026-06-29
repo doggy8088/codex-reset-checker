@@ -72,11 +72,21 @@ codex-reset-checker --auth /path/to/auth.json
 codex-reset-checker /path/to/auth.json
 ```
 
+### 輸出原始 JSON
+
+```bash
+codex-reset-checker --json
+codex-reset-checker --auth /path/to/auth.json --json
+```
+
+`--json` 會直接輸出 API 回傳結果的單行 JSON，不套用框線、顏色或人性化時間文字，適合交給其他工具處理。
+
 ### 不安裝直接執行
 
 ```bash
 node ./bin/codex-reset-checker.js
 node ./bin/codex-reset-checker.js --auth /path/to/auth.json
+node ./bin/codex-reset-checker.js --json
 ```
 
 ### 從 npm 一次性執行
@@ -137,27 +147,44 @@ pwsh -NoProfile -File .\scripts\check-codex-rate-limit.ps1
 - 每筆 `credit` 的 `granted_at`
 - 每筆 `credit` 的 `expires_at`
 - 每筆 `credit` 的 `status`
+- `expires_at` 會同時附上精簡剩餘時間（例如：`剩餘 2d 3h 20m`、`到期已過 10m`）
 
 輸出範例：
 
 ```text
-available_count: 2
-credits:
-- credit #1
-  granted_at: 2026-06-29 12:03:15 +08:00
-  expires_at: 2026-07-06 12:03:15 +08:00
-  status: active
-- credit #2
-  granted_at: 2026-06-29 12:03:15 +08:00
-  expires_at: 2026-07-13 12:03:15 +08:00
-  status: active
+┏━ Codex 手動重置額度查詢結果 ━━━━━━━━━━━━━━━━━━━
+查詢時間：2026-06-29 14:00:00 +08:00
+可用額度：2 次
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+額度清單
+┌────────────────────────────────────────────────────────┐
+│ #001                                                   │
+│ [可用] status=active 仍在有效                         │
+│ [充足] 剩餘 7d 0h 0m                                │
+│ [期限] 獲得 2026-06-29 12:03  到期 2026-07-06 12:03  │
+└────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│ #002                                                   │
+│ [可用] status=active 仍在有效                         │
+│ [充足] 剩餘 14d 0h 0m                               │
+│ [期限] 獲得 2026-06-29 12:03  到期 2026-07-13 12:03  │
+└────────────────────────────────────────────────────────┘
 ```
 
 無資料時：
 
 ```text
-available_count: 0
-credits: 0
+┏━ Codex 手動重置額度查詢結果 ━━━━━━━━━━━━━━━━━━━
+查詢時間：2026-06-29 14:00:00 +08:00
+可用額度：0 次
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+額度清單
+```
+
+JSON 輸出範例：
+
+```json
+{"available_count":2,"credits":[{"granted_at":"2026-06-29T04:03:15Z","expires_at":"2026-07-06T04:03:15Z","status":"active"}]}
 ```
 
 * * *
@@ -180,8 +207,10 @@ credits: 0
 
 `granted_at` 與 `expires_at` 會依本機時區輸出：
 
-- 格式：`YYYY-MM-DD HH:mm:ss +HH:MM`
+- 查詢時間格式：`yyyy-MM-dd HH:mm:ss +HH:MM`
+- `granted_at` 與 `expires_at` 格式：`yyyy-MM-dd HH:mm`
 - 失敗解析時保留原始值，不中斷輸出
+- `--json` 模式不轉換時間格式，直接保留 API 回傳值
 
 * * *
 
