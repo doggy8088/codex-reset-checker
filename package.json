@@ -1,0 +1,27 @@
+{
+  "name": "@willh/codex-reset-checker",
+  "version": "0.1.0",
+  "description": "Query Codex/ChatGPT manual reset credits and expiry schedule from local auth.json.",
+  "author": "Will 保哥",
+  "type": "commonjs",
+  "bin": {
+    "codex-reset-checker": "bin/codex-reset-checker.js"
+  },
+  "main": "bin/codex-reset-checker.js",
+  "files": [
+    "bin",
+    "scripts",
+    "README.md"
+  ],
+  "keywords": [
+    "codex",
+    "chatgpt",
+    "rate-limit",
+    "reset-credits",
+    "auth"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=14"
+  }
+}

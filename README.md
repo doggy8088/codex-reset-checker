@@ -1,107 +1,144 @@
-# Codex 手動重置額度查詢工具
+# Codex 手動重置次數查詢工具
 
-## 專案目標
+## 專案定位
 
-**本工具只做唯讀查詢，不安裝任何套件、不修改任何檔案、也不輸出或外洩 `access_token` / `account_id`。**
+**專案提供 Node.js CLI 介面，並保留原始 Bash/PowerShell 腳本於 `scripts/` 目錄。**
 
-本專案提供兩個可直接使用的腳本，對應 Linux/macOS 與 Windows：
-
-- `check-codex-rate-limit.sh`：Bash（Linux/macOS）
-- `check-codex-rate-limit.ps1`：PowerShell（Windows 可用 `powershell.exe` / `pwsh.exe`）
-
-兩者都會：
-
-1. 讀取本機 Codex 登入資訊 (`auth.json`)
-2. 從 `tokens.access_token` 取得授權
-3. 若存在，帶入 `tokens.account_id` 到 `ChatGPT-Account-ID` header
-4. 呼叫唯讀 API：`GET https://chatgpt.com/backend-api/wham/rate-limit-reset-credits`
-5. 僅輸出：
-   - `available_count`
-   - 每筆 `granted_at`
-   - 每筆 `expires_at`
-   - 每筆 `status`
-6. 將時間轉成本機時區顯示
+- 套件名稱：`@willh/codex-reset-checker`
+- 行為主軸：純讀取查詢，不修改任何檔案，不安裝額外套件，不輸出 `access_token` / `account_id`
+- 查詢 API：`GET https://chatgpt.com/backend-api/wham/rate-limit-reset-credits`
 
 * * *
 
-## 前置條件
+## 目錄
 
-- Linux/macOS：需具備 `bash` 與 `python3`
-- Windows：具備 `PowerShell`（建議 `pwsh`，`powershell.exe` 亦可）
-- 本機必須有 `~/.codex/auth.json`（macOS/Linux）或 `C:\Users\<使用者>\.codex\auth.json`（Windows）
-- 指令僅讀取、查詢，不會更動檔案
-
-* * *
-
-## auth.json 欄位說明
-
-腳本只使用以下欄位：
-
-- `tokens.access_token`（必要）
-- `tokens.account_id`（非必要，若有則加到 header）
-
-若缺少 `tokens.access_token`，腳本會立刻終止並顯示錯誤，不會送出 API 請求。
+- [1. 檔案結構](#1-檔案結構)
+- [2. 安裝方式](#2-安裝方式)
+- [3. CLI 使用方式](#3-cli-使用方式)
+- [4. auth.json 來源與欄位](#4-authjson-來源與欄位)
+- [5. API Header 規格](#5-api-header-規格)
+- [6. 輸出欄位與格式](#6-輸出欄位與格式)
+- [7. 錯誤處理](#7-錯誤處理)
+- [8. 時間轉換規則](#8-時間轉換規則)
+- [9. 發佈到 npm](#9-發佈到-npm)
+- [10. 安全與隱私原則](#10-安全與隱私原則)
 
 * * *
 
-## 安裝與執行
+## 1. 檔案結構
 
-### 1) Linux / macOS
+```text
+.
+├─ bin/
+│  └─ codex-reset-checker.js      Node.js CLI 主程式
+├─ scripts/
+│  ├─ check-codex-rate-limit.sh   原始 Bash 腳本
+│  └─ check-codex-rate-limit.ps1  原始 PowerShell 腳本
+├─ package.json
+└─ README.md
+```
+
+* * *
+
+## 2. 安裝方式
+
+### 從 npm 安裝（建議）
 
 ```bash
-chmod +x check-codex-rate-limit.sh
-
-# 使用預設 auth 路徑（~/.codex/auth.json）
-./check-codex-rate-limit.sh
-
-# 若需要指定其他 auth 路徑
-./check-codex-rate-limit.sh /path/to/auth.json
+npm install -g @willh/codex-reset-checker
 ```
 
-### 2) Windows PowerShell
+### 本機直接使用
 
-```powershell
-# 預設使用 $env:USERPROFILE\.codex\auth.json
-pwsh -NoProfile -File .\check-codex-rate-limit.ps1
-
-# 指定 auth 路徑
-pwsh -NoProfile -File .\check-codex-rate-limit.ps1 "C:\Users\你自己的使用者\.codex\auth.json"
-```
-
-使用 `powershell.exe` 也可直接執行 `check-codex-rate-limit.ps1`：
-
-```powershell
-powershell.exe -NoProfile -File .\check-codex-rate-limit.ps1
+```bash
+npm install
 ```
 
 * * *
 
-## API 呼叫規格
+## 3. CLI 使用方式
 
-腳本送出的 HTTP 請求 header：
+### 全域安裝後直接執行
+
+```bash
+codex-reset-checker
+```
+
+### 指定 `auth.json` 路徑
+
+```bash
+codex-reset-checker --auth /path/to/auth.json
+# 或
+codex-reset-checker /path/to/auth.json
+```
+
+### 不安裝直接執行
+
+```bash
+node ./bin/codex-reset-checker.js
+node ./bin/codex-reset-checker.js --auth /path/to/auth.json
+```
+
+### 從 npm 一次性執行
+
+```bash
+npx @willh/codex-reset-checker
+```
+
+### 在 Windows 使用 PowerShell 或 CMD
+
+```powershell
+# 全域安裝後
+codex-reset-checker
+# 不建議混用舊腳本，但仍可保留
+pwsh -NoProfile -File .\scripts\check-codex-rate-limit.ps1
+```
+
+> 注意：PowerShell 範例中，請用自己環境的實際 `auth.json` 位置。
+
+* * *
+
+## 4. auth.json 來源與欄位
+
+本工具會讀取本機登入資訊：
+
+- macOS/Linux 預設：`~/.codex/auth.json`
+- Windows 預設：`C:\Users\<使用者>\.codex\auth.json`
+
+只會使用以下欄位：
+
+- `tokens.access_token`（必要）
+- `tokens.account_id`（可選，有才放入 request header）
+
+若缺少 `tokens.access_token`，程式直接退出並顯示錯誤訊息，不會送出 API 請求。
+
+* * *
+
+## 5. API Header 規格
 
 | Header 名稱 | 值 |
-|---|---|
+| --- | --- |
 | `Authorization` | `Bearer <access_token>` |
 | `OpenAI-Beta` | `codex-1` |
 | `originator` | `Codex Desktop` |
-| `ChatGPT-Account-ID` | `<account_id>`（若 `auth.json` 有才加） |
+| `ChatGPT-Account-ID` | `<account_id>`（若存在才加入） |
 
-請求 URL：
+請求方法：`GET`
 
-`GET https://chatgpt.com/backend-api/wham/rate-limit-reset-credits`
+請求 URL：`https://chatgpt.com/backend-api/wham/rate-limit-reset-credits`
 
 * * *
 
-## 輸出格式
+## 6. 輸出欄位與格式
 
-### 成功輸出
+程式只回報下列欄位：
 
-- 先輸出 `available_count`
-- 再逐筆輸出 `credit` 內容
-- 每筆欄位依序顯示：`granted_at`、`expires_at`、`status`
+- `available_count`
+- 每筆 `credit` 的 `granted_at`
+- 每筆 `credit` 的 `expires_at`
+- 每筆 `credit` 的 `status`
 
-範例（實際時間與數值依回應而異）：
+輸出範例：
 
 ```text
 available_count: 2
@@ -116,78 +153,66 @@ credits:
   status: active
 ```
 
-### 當無 credit 時
+無資料時：
 
 ```text
 available_count: 0
 credits: 0
 ```
 
-### 錯誤情境
+* * *
 
-常見錯誤訊息樣式：
+## 7. 錯誤處理
 
-```text
-錯誤：找不到 auth.json：<path>
-錯誤：auth.json 內未找到 tokens.access_token
-錯誤：請求 API 失敗：HTTP Error 401: Unauthorized
-錯誤：請求 API 失敗：HTTP Error 403: Forbidden
+常見錯誤訊息（不會洩漏敏感值）：
+
+- `錯誤：找不到 auth.json：<path>`
+- `錯誤：auth.json 內未找到 tokens.access_token`
+- `錯誤：讀取或解析 auth.json 失敗：...`
+- `錯誤：請求 API 失敗，HTTP 401 Unauthorized...`
+- `錯誤：請求 API 失敗，HTTP 403 Forbidden...`
+
+若收到 401/403，多半是 token 過期、登入權限問題或會話已失效，請先在 Codex 端重新登入，確認 `~/.codex/auth.json` 已更新。
+
+* * *
+
+## 8. 時間轉換規則
+
+`granted_at` 與 `expires_at` 會依本機時區輸出：
+
+- 格式：`YYYY-MM-DD HH:mm:ss +HH:MM`
+- 失敗解析時保留原始值，不中斷輸出
+
+* * *
+
+## 9. 發佈到 npm
+
+```bash
+npm login
+npm publish --access public
 ```
 
-> 錯誤訊息只揭露問題，不會輸出 `access_token` 或 `account_id`。
+建議發佈前確認：
+
+- `name` 為 `@willh/codex-reset-checker`
+- `bin.codex-reset-checker` 指向 `bin/codex-reset-checker.js`
+- `bin/codex-reset-checker.js` 有執行權限（若以直接執行）
 
 * * *
 
-## 時間格式與時區
+## 10. 安全與隱私原則
 
-輸出時間皆轉換為**執行主機本機時區**：
-
-- Bash 版格式為 `YYYY-MM-DD HH:mm:ss +0800`
-- PowerShell 版格式為 `YYYY-MM-DD HH:mm:ss +08:00`
-
-如果 API 回傳時間無法解析，會原樣輸出原始字串，避免格式轉換失敗造成整體中斷。
-
-* * *
-
-## 安全與隱私原則
-
-**腳本只做唯讀查詢，沒有任何檔案寫入。**
-
-- 不會修改 `auth.json`
-- 不會輸出 token 或帳號識別字
-- 不會新增外部套件或安裝流程
-- 不會嘗試逆向或取得未授權資料
-
-在多人共用設備上，請避免將 `auth.json` 或終端機紀錄分享到不安全位置。
+- 不安裝任何非必要套件
+- 不修改任何本機檔案
+- 不輸出 `access_token` 或 `account_id`
+- 只讀取本機 `auth.json`
+- 無資料持久化、無快取、無遙測
 
 * * *
 
-## 版本相容性與注意事項
+## 附錄：舊腳本保留說明
 
-| 平台 | 腳本 | 相依 |
-|---|---|---|
-| Linux/macOS | `check-codex-rate-limit.sh` | `python3`（用來解析 JSON） |
-| Windows | `check-codex-rate-limit.ps1` | PowerShell 5.1+ / `pwsh` |
+原始 Bash 與 PowerShell 腳本仍保留在 `scripts/`，作為非 Node.js 環境下的備援：
 
-PowerShell 版本會嘗試存取預設路徑 `$env:USERPROFILE\.codex\auth.json`，請確認路徑存在。
-
-* * *
-
-## 常見問題
-
-- **為何有時會回 401/403？**  
-  通常是 token 過期、登入憑證失效、或帳號權限限制。請先重新登入 Codex 再試一次。
-- **是否一定要有 `account_id`？**  
-  不需要。沒有時會略過該 header，只用 `access_token` 查詢。
-- **為何有些欄位不是 `credits`？**  
-  部分回應可能使用 `items` 或 `data`，腳本有包含這兩種可能名稱以提升相容性。
-- **能否改成只輸出 JSON？**  
-  目前設計是純文字可閱讀輸出；你可以再包裝一層 `jq`/PowerShell 轉換，仍不會影響核心安全原則。
-
-* * *
-
-## 可直接做的下一步
-
-1. 用你目前登入環境的 `~/.codex/auth.json` / `%USERPROFILE%\.codex\auth.json` 實際執行一次，確認回應是否回到 `credits` 清單。
-2. 若有大量筆數，建議先確認 `available_count` 與 `credits` 筆數是否一致，再比對到期日是否符合預期。
-3. 若只想每日巡檢，可結合 `cron`（Linux/macOS）或排程工作排程（Windows）定期執行並將輸出導向日誌。
+- `scripts/check-codex-rate-limit.sh`
+- `scripts/check-codex-rate-limit.ps1`
