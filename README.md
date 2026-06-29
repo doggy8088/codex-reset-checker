@@ -15,13 +15,14 @@
 - [1. 檔案結構](#1-檔案結構)
 - [2. 安裝方式](#2-安裝方式)
 - [3. CLI 使用方式](#3-cli-使用方式)
-- [4. auth.json 來源與欄位](#4-authjson-來源與欄位)
-- [5. API Header 規格](#5-api-header-規格)
-- [6. 輸出欄位與格式](#6-輸出欄位與格式)
-- [7. 錯誤處理](#7-錯誤處理)
-- [8. 時間轉換規則](#8-時間轉換規則)
-- [9. 發佈到 npm](#9-發佈到-npm)
-- [10. 安全與隱私原則](#10-安全與隱私原則)
+- [4. 執行畫面](#4-執行畫面)
+- [5. auth.json 來源與欄位](#5-authjson-來源與欄位)
+- [6. API Header 規格](#6-api-header-規格)
+- [7. 輸出欄位與格式](#7-輸出欄位與格式)
+- [8. 錯誤處理](#8-錯誤處理)
+- [9. 時間轉換規則](#9-時間轉換規則)
+- [10. 發佈到 npm](#10-發佈到-npm)
+- [11. 安全與隱私原則](#11-安全與隱私原則)
 
 * * *
 
@@ -108,7 +109,13 @@ pwsh -NoProfile -File .\scripts\check-codex-rate-limit.ps1
 
 * * *
 
-## 4. auth.json 來源與欄位
+## 4. 執行畫面
+
+![Codex 手動重置額度查詢結果](assets/codex-reset-checker-screenshot.png)
+
+* * *
+
+## 5. auth.json 來源與欄位
 
 本工具會讀取本機登入資訊：
 
@@ -124,7 +131,7 @@ pwsh -NoProfile -File .\scripts\check-codex-rate-limit.ps1
 
 * * *
 
-## 5. API Header 規格
+## 6. API Header 規格
 
 | Header 名稱 | 值 |
 | --- | --- |
@@ -139,7 +146,7 @@ pwsh -NoProfile -File .\scripts\check-codex-rate-limit.ps1
 
 * * *
 
-## 6. 輸出欄位與格式
+## 7. 輸出欄位與格式
 
 程式只回報下列欄位：
 
@@ -189,7 +196,7 @@ JSON 輸出範例：
 
 * * *
 
-## 7. 錯誤處理
+## 8. 錯誤處理
 
 常見錯誤訊息（不會洩漏敏感值）：
 
@@ -203,7 +210,7 @@ JSON 輸出範例：
 
 * * *
 
-## 8. 時間轉換規則
+## 9. 時間轉換規則
 
 `granted_at` 與 `expires_at` 會依本機時區輸出：
 
@@ -214,7 +221,7 @@ JSON 輸出範例：
 
 * * *
 
-## 9. 發佈到 npm
+## 10. 發佈到 npm
 
 ```bash
 npm login
@@ -229,7 +236,7 @@ npm publish --access public
 
 * * *
 
-## 10. 安全與隱私原則
+## 11. 安全與隱私原則
 
 - 不安裝任何非必要套件
 - 不修改任何本機檔案
