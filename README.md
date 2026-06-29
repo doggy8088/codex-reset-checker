@@ -2,7 +2,9 @@
 
 ## 專案定位
 
-**這是一個 Node.js CLI 工具，用來查詢 Codex/ChatGPT 手動重置額度與到期時間。**
+**這是一個用來查詢 Codex/ChatGPT 手動重置額度與到期時間的工具。**
+
+![Codex 手動重置額度查詢結果](assets/codex-reset-checker-screenshot.png)
 
 工具會讀取本機 Codex 登入資訊中的存取權杖，呼叫 ChatGPT 後端 API 取得目前可用的手動重置額度清單，並以終端機友善格式顯示每筆額度的取得時間、到期時間與剩餘時間。整個流程只做查詢，不會修改本機檔案，也不會輸出 `access_token` 或 `account_id`。
 
