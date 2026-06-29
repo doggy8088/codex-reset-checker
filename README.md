@@ -1,16 +1,18 @@
 # Codex 手動重置次數查詢工具
 
-## 專案定位
+## 專案介紹
 
-**這是一個用來查詢 Codex/ChatGPT 手動重置額度與到期時間的工具。**
-
-![Codex 手動重置額度查詢結果](assets/codex-reset-checker-screenshot.png)
+這是用來查詢 Codex/ChatGPT 手動重置額度與到期時間的 CLI 工具，重點在於快速、穩定地取得目前可用額度資訊。
 
 工具會讀取本機 Codex 登入資訊中的存取權杖，呼叫 ChatGPT 後端 API 取得目前可用的手動重置額度清單，並以終端機友善格式顯示每筆額度的取得時間、到期時間與剩餘時間。整個流程只做查詢，不會修改本機檔案，也不會輸出 `access_token` 或 `account_id`。
 
-- 套件名稱：`@willh/codex-reset-checker`
-- 行為主軸：純讀取查詢，不修改任何檔案，不安裝額外套件，不輸出 `access_token` / `account_id`
-- 查詢 API：`GET https://chatgpt.com/backend-api/wham/rate-limit-reset-credits`
+快速開始：
+
+```bash
+npx @willh/codex-reset-checker
+```
+
+![Codex 手動重置額度查詢結果](assets/codex-reset-checker-screenshot.png)
 
 * * *
 
