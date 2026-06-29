@@ -2,7 +2,9 @@
 
 ## 專案定位
 
-**專案提供 Node.js CLI 介面，並保留原始 Bash/PowerShell 腳本於 `scripts/` 目錄。**
+**這是一個 Node.js CLI 工具，用來查詢 Codex/ChatGPT 手動重置額度與到期時間。**
+
+工具會讀取本機 Codex 登入資訊中的存取權杖，呼叫 ChatGPT 後端 API 取得目前可用的手動重置額度清單，並以終端機友善格式顯示每筆額度的取得時間、到期時間與剩餘時間。整個流程只做查詢，不會修改本機檔案，也不會輸出 `access_token` 或 `account_id`。
 
 - 套件名稱：`@willh/codex-reset-checker`
 - 行為主軸：純讀取查詢，不修改任何檔案，不安裝額外套件，不輸出 `access_token` / `account_id`
@@ -32,9 +34,8 @@
 .
 ├─ bin/
 │  └─ codex-reset-checker.js      Node.js CLI 主程式
-├─ scripts/
-│  ├─ check-codex-rate-limit.sh   原始 Bash 腳本
-│  └─ check-codex-rate-limit.ps1  原始 PowerShell 腳本
+├─ assets/
+│  └─ codex-reset-checker-screenshot.png
 ├─ package.json
 └─ README.md
 ```
@@ -99,13 +100,10 @@ npx @willh/codex-reset-checker
 ### 在 Windows 使用 PowerShell 或 CMD
 
 ```powershell
-# 全域安裝後
 codex-reset-checker
-# 不建議混用舊腳本，但仍可保留
-pwsh -NoProfile -File .\scripts\check-codex-rate-limit.ps1
 ```
 
-> 注意：PowerShell 範例中，請用自己環境的實際 `auth.json` 位置。
+> 注意：如需指定 `auth.json` 路徑，請改用自己環境的實際檔案位置。
 
 * * *
 
@@ -243,12 +241,3 @@ npm publish --access public
 - 不輸出 `access_token` 或 `account_id`
 - 只讀取本機 `auth.json`
 - 無資料持久化、無快取、無遙測
-
-* * *
-
-## 附錄：舊腳本保留說明
-
-原始 Bash 與 PowerShell 腳本仍保留在 `scripts/`，作為非 Node.js 環境下的備援：
-
-- `scripts/check-codex-rate-limit.sh`
-- `scripts/check-codex-rate-limit.ps1`
