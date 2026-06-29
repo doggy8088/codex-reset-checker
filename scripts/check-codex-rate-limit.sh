@@ -92,5 +92,3 @@ for idx, credit in enumerate(credits, 1):
     print(f"  expires_at: {expires_at}")
     print(f"  status: {status}")
 PY
-
-chmod +x check-codex-rate-limit.sh
