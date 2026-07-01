@@ -9,6 +9,7 @@ const API_URL = 'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits';
 
 const COLOR = process.stdout && process.stdout.isTTY && !process.env.NO_COLOR;
 const CREDIT_WIDTH = 54;
+const CREDIT_GAP = 2;
 const STYLE = COLOR
   ? {
       reset: '\x1b[0m',
@@ -420,7 +421,7 @@ function textDisplayWidth(value) {
   return width;
 }
 
-function printCreditCard(index, credit) {
+function getCreditCardLines(index, credit) {
   const mood = parseStatusMood(credit.status);
   const grantedAt = formatShortDate(credit.granted_at);
   const expiresAt = formatShortDate(credit.expires_at);
@@ -439,16 +440,54 @@ function printCreditCard(index, credit) {
       expiresAt
     )}`,
   ];
-  const contentWidth = Math.max(CREDIT_WIDTH, ...lines.map((item) => textDisplayWidth(item)));
-  const top = `┌${'─'.repeat(contentWidth + 2)}┐`;
-  const bottom = `└${'─'.repeat(contentWidth + 2)}┘`;
 
-  console.log(paint('bold', top));
-  lines.forEach((line) => {
-    console.log(buildCreditLine(' ', line, contentWidth));
+  return lines;
+}
+
+function buildCreditCardLines(lines, contentWidth = CREDIT_WIDTH) {
+  const safeWidth = Math.max(contentWidth, CREDIT_WIDTH, ...lines.map((item) => textDisplayWidth(item)));
+  const top = `┌${'─'.repeat(safeWidth + 2)}┐`;
+  const bottom = `└${'─'.repeat(safeWidth + 2)}┘`;
+
+  return [
+    paint('bold', top),
+    ...lines.map((line) => buildCreditLine(' ', line, safeWidth)),
+    paint('bold', bottom),
+  ];
+}
+
+function printCreditCardsInSingleColumn(cards) {
+  cards.forEach((card) => {
+    card.lines.forEach((line) => {
+      console.log(line);
+    });
   });
-  console.log(paint('bold', bottom));
-  return 0;
+}
+
+function printCreditCardsInTwoColumns(cards, terminalWidth, cardWidth) {
+  const cardOuterWidth = cardWidth + 4;
+  const canTwoColumns = cards.length >= 2 && terminalWidth >= cardOuterWidth * 2 + CREDIT_GAP;
+
+  if (!canTwoColumns) {
+    return false;
+  }
+
+  const cardLines = cards.map((card) => card.lines);
+  const rowHeight = Math.max(...cardLines.map((item) => item.length));
+
+  for (let i = 0; i < cardLines.length; i += 2) {
+    const left = cardLines[i];
+    const right = cardLines[i + 1] || null;
+
+    for (let row = 0; row < rowHeight; row += 1) {
+      const leftLine = left[row] || '';
+      const rightLine = right ? right[row] : '';
+      const gap = right ? ' '.repeat(CREDIT_GAP) : '';
+      console.log(`${leftLine}${gap}${rightLine}`);
+    }
+  }
+
+  return true;
 }
 
 function printHeader(availableCount, availableColor) {
@@ -477,12 +516,38 @@ function printCredits(credits) {
     return;
   }
 
-  credits.forEach((credit, index) => {
-    if (!credit || typeof credit !== 'object') {
-      return;
-    }
-    printCreditCard(index, credit);
-  });
+  const prepared = credits
+    .map((credit, index) => {
+      if (!credit || typeof credit !== 'object') {
+        return null;
+      }
+
+      const lines = getCreditCardLines(index, credit);
+      const contentWidth = Math.max(CREDIT_WIDTH, ...lines.map((item) => textDisplayWidth(item)));
+      return {
+        lines,
+        width: contentWidth,
+      };
+    })
+    .filter(Boolean);
+
+  if (!prepared.length) {
+    return;
+  }
+
+  const maxContentWidth = Math.max(...prepared.map((item) => item.width));
+  const cards = prepared.map((item) => ({
+    lines: buildCreditCardLines(item.lines, maxContentWidth),
+  }));
+  const terminalWidth =
+    process.stdout && process.stdout.isTTY && typeof process.stdout.columns === 'number'
+      ? process.stdout.columns
+      : 0;
+  if (printCreditCardsInTwoColumns(cards, terminalWidth, maxContentWidth)) {
+    return;
+  }
+
+  printCreditCardsInSingleColumn(cards);
 }
 
 async function main() {
