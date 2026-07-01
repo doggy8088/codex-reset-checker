@@ -10,6 +10,16 @@ const API_URL = 'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits';
 const COLOR = process.stdout && process.stdout.isTTY && !process.env.NO_COLOR;
 const CREDIT_WIDTH = 54;
 const CREDIT_GAP = 2;
+const APP_VERSION = (() => {
+  try {
+    const pkgPath = path.join(__dirname, '..', 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    return pkg && typeof pkg.version === 'string' ? pkg.version : 'N/A';
+  } catch {
+    return 'N/A';
+  }
+})();
+
 const STYLE = COLOR
   ? {
       reset: '\x1b[0m',
@@ -499,7 +509,7 @@ function printHeader(availableCount, availableColor) {
     now.getHours()
   )}:${pad(now.getMinutes())}:${pad(now.getSeconds())} ${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
 
-  console.log(paint('bold', '┏━ Codex 手動重置額度查詢結果 ━━━━━━━━━━━━━━━━━━━'));
+  console.log(paint('bold', `┏━ Codex 手動重置額度查詢 (v${APP_VERSION}) ━━━━━━━━━━━━━━━━━━`));
   console.log(`${paint('dim', '查詢時間')}：${paint('cyan', nowText)}`);
   const count = Number.parseInt(availableCount, 10);
   const hasAvailableCount = Number.isFinite(count);
