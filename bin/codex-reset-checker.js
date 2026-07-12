@@ -431,12 +431,31 @@ function normalizeResetAt(value) {
   return null;
 }
 
-function normalizeUsageWindow(window, name) {
+function inferUsageWindowName(window, fallbackName) {
+  if (!isObject(window)) {
+    return fallbackName;
+  }
+
+  const seconds = normalizeNonNegativeNumber(window.limit_window_seconds);
+  if (seconds !== null) {
+    if (seconds >= 6 * 24 * 60 * 60) {
+      return '每週額度';
+    }
+
+    if (seconds <= 6 * 60 * 60) {
+      return '目前工作階段';
+    }
+  }
+
+  return fallbackName;
+}
+
+function normalizeUsageWindow(window, fallbackName) {
   const source = isObject(window) ? window : {};
   const usedPercent = normalizePercent(source.used_percent);
 
   return {
-    name,
+    name: inferUsageWindowName(source, fallbackName),
     used_percent: usedPercent,
     remaining_percent: usedPercent === null ? null : roundNumber(100 - usedPercent),
     limit_window_seconds: normalizeNonNegativeNumber(source.limit_window_seconds),
@@ -585,8 +604,12 @@ function normalizeUsageResponse(response) {
   }
 
   return {
-    primary_window: normalizeUsageWindow(response.rate_limit.primary_window, '目前工作階段'),
-    secondary_window: normalizeUsageWindow(response.rate_limit.secondary_window, '每週額度'),
+    primary_window: isObject(response.rate_limit.primary_window)
+      ? normalizeUsageWindow(response.rate_limit.primary_window, '目前工作階段')
+      : null,
+    secondary_window: isObject(response.rate_limit.secondary_window)
+      ? normalizeUsageWindow(response.rate_limit.secondary_window, '每週額度')
+      : null,
     additional_rate_limits: normalizeAdditionalRateLimits(response),
   };
 }
@@ -733,7 +756,11 @@ function buildUsageCardLines(title, window, contentWidth = USAGE_CARD_WIDTH) {
   const contentLines = [
     paint('dim', title),
     `${paint(color, remaining)} ${paint('dim', '剩餘')} ${paint('gray', `・已使用 ${used}`)}`,
-    buildUsageProgressBar(window.remaining_percent, USAGE_BAR_WIDTH, color),
+    buildUsageProgressBar(
+      window.remaining_percent,
+      Math.max(USAGE_BAR_WIDTH, contentWidth),
+      color
+    ),
     `${paint('dim', '重設時間')} ${paint('gray', reset)}`,
   ];
   return buildRoundedBoxLines(contentLines, contentWidth);
@@ -806,7 +833,10 @@ function getUsageCards(usage) {
   const cards = [];
   if (usage.primary_window) {
     cards.push({
-      title: getUsageCardTitle(usage.primary_window.name, 'primary'),
+      title: getUsageCardTitle(
+        usage.primary_window.name,
+        usage.primary_window.name === '每週額度' ? 'secondary' : 'primary'
+      ),
       window: usage.primary_window,
     });
   }
@@ -823,7 +853,10 @@ function getUsageCards(usage) {
   additionalRateLimits.forEach((limit) => {
     if (limit.primary_window) {
       cards.push({
-        title: getUsageCardTitle(limit.name, 'primary'),
+        title: getUsageCardTitle(
+          limit.name,
+          limit.primary_window.name === '每週額度' ? 'secondary' : 'primary'
+        ),
         window: limit.primary_window,
       });
     }
@@ -1208,6 +1241,7 @@ module.exports = {
   formatUsageReset,
   getCurrentTerminalWidth,
   getManualResetLayout,
+  getUsageCards,
   getUsageLayout,
   main,
   normalizeUsageResponse,

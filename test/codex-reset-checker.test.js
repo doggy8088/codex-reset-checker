@@ -208,6 +208,43 @@ async function testNormalizeMissingAndNullWindowFields() {
   assert.strictEqual(weeklyOnly.additional_rate_limits[0].secondary_window.used_percent, 25);
 }
 
+async function testNormalizeWeeklyOnlyPrimaryWindow() {
+  const normalized = checker.normalizeUsageResponse({
+    rate_limit: {
+      primary_window: {
+        used_percent: 7,
+        limit_window_seconds: 604800,
+        reset_after_seconds: 500000,
+        reset_at: 1784504427,
+      },
+      secondary_window: null,
+    },
+    additional_rate_limits: [
+      {
+        limit_name: 'GPT-5.3-Codex-Spark',
+        rate_limit: {
+          primary_window: {
+            used_percent: 3,
+            limit_window_seconds: 604800,
+            reset_after_seconds: 510000,
+            reset_at: 1784504432,
+          },
+          secondary_window: null,
+        },
+      },
+    ],
+  });
+
+  assert.strictEqual(normalized.primary_window.name, '每週額度');
+  assert.strictEqual(normalized.secondary_window, null);
+  assert.strictEqual(normalized.additional_rate_limits[0].primary_window.name, '每週額度');
+  assert.strictEqual(normalized.additional_rate_limits[0].secondary_window, null);
+
+  const cards = checker.getUsageCards(normalized);
+  assert.strictEqual(cards[0].title, '每週用量上限');
+  assert.strictEqual(cards[1].title, 'GPT-5.3-Codex-Spark 每週用量上限');
+}
+
 async function testUsageLayoutUsesManualResetWidthCap() {
   const manualLayout = checker.getManualResetLayout([]);
   const usageLayout = checker.getUsageLayout([
@@ -379,6 +416,7 @@ async function testHumanOutputSeparatesBothCreditTypes() {
 
 const tests = [
   ['完整使用額度回應可標準化', testNormalizeCompleteUsage],
+  ['只有 primary window 的每週額度可正確辨識', testNormalizeWeeklyOnlyPrimaryWindow],
   ['缺少或 null 欄位不會讓解析失敗', testNormalizeMissingAndNullWindowFields],
   ['使用額度寬度受手動重置額度限制', testUsageLayoutUsesManualResetWidthCap],
   ['兩個端點共用標頭且路徑正確', testRequestsReuseHeadersAndEndpoints],
