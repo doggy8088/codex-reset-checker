@@ -5,7 +5,8 @@ const path = require('path');
 const os = require('os');
 const https = require('https');
 
-const API_URL = 'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits';
+const RATE_LIMIT_API_URL = 'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits';
+const USAGE_API_URL = 'https://chatgpt.com/backend-api/wham/usage';
 
 const COLOR = process.stdout && process.stdout.isTTY && !process.env.NO_COLOR;
 const CREDIT_WIDTH = 54;
@@ -56,7 +57,7 @@ function printUsage() {
 
 選項：
   --auth <path>   指定 auth.json 路徑（未提供則依作業系統自動判斷）
-  --json          以單行 JSON 輸出原始查詢結果
+  --json          以單行 JSON 輸出查詢結果與標準化使用額度
   -h, --help      顯示說明`);
 }
 
@@ -270,7 +271,36 @@ function loadAuth(authPath) {
   }
 }
 
-function requestRateLimit(accessToken, accountId) {
+function isObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function sanitizeSensitiveText(value, sensitiveValues = []) {
+  let text = String(value);
+
+  for (const sensitiveValue of sensitiveValues) {
+    if (sensitiveValue === null || sensitiveValue === undefined) {
+      continue;
+    }
+
+    const secret = String(sensitiveValue);
+    if (secret) {
+      text = text.split(secret).join('[已隱藏]');
+    }
+  }
+
+  return text.replace(/(Bearer\s+)[^\s"'`,}]+/gi, '$1[已隱藏]');
+}
+
+function getErrorMessage(error) {
+  if (error && typeof error.message === 'string' && error.message) {
+    return error.message;
+  }
+
+  return String(error || '未知錯誤');
+}
+
+function buildApiHeaders(accessToken, accountId) {
   const headers = {
     Authorization: `Bearer ${accessToken}`,
     'OpenAI-Beta': 'codex-1',
@@ -281,7 +311,27 @@ function requestRateLimit(accessToken, accountId) {
     headers['ChatGPT-Account-ID'] = String(accountId);
   }
 
-  const endpoint = new URL(API_URL);
+  return headers;
+}
+
+function formatResponseBody(body, sensitiveValues) {
+  if (!body) {
+    return '';
+  }
+
+  const sanitized = sanitizeSensitiveText(body, sensitiveValues);
+  const maxLength = 1000;
+  const shortened = sanitized.length > maxLength
+    ? `${sanitized.slice(0, maxLength)}…`
+    : sanitized;
+
+  return ` 回應內容：${shortened}`;
+}
+
+function requestJson(apiUrl, accessToken, accountId) {
+  const headers = buildApiHeaders(accessToken, accountId);
+  const sensitiveValues = [accessToken, accountId];
+  const endpoint = new URL(apiUrl);
 
   return new Promise((resolve, reject) => {
     const req = https.request(
@@ -300,7 +350,7 @@ function requestRateLimit(accessToken, accountId) {
 
         res.on('end', () => {
           if (res.statusCode < 200 || res.statusCode >= 300) {
-            const message = chunks ? ` 回應內容：${chunks}` : '';
+            const message = formatResponseBody(chunks, sensitiveValues);
             reject(new Error(`請求 API 失敗，HTTP ${res.statusCode} ${res.statusMessage}.${message}`));
             return;
           }
@@ -322,21 +372,482 @@ function requestRateLimit(accessToken, accountId) {
   });
 }
 
-function parseAvailableMood(availableCount) {
-  const count = Number.parseInt(availableCount, 10);
-  if (!Number.isFinite(count)) {
-    return { icon: '[未定義]', mood: '目前看不清楚剩餘狀態', color: 'yellow', emoji: '' };
+function requestRateLimit(accessToken, accountId) {
+  return requestJson(RATE_LIMIT_API_URL, accessToken, accountId);
+}
+
+function requestUsage(accessToken, accountId) {
+  return requestJson(USAGE_API_URL, accessToken, accountId);
+}
+
+function toFiniteNumber(value) {
+  if (value === null || value === undefined || typeof value === 'boolean') {
+    return null;
   }
 
-  if (count <= 0) {
-    return { icon: '[告急]', mood: '目前已經是空白線，建議觀察新配額到來', color: 'red' };
+  if (typeof value === 'string' && value.trim() === '') {
+    return null;
   }
 
-  if (count <= 2) {
-    return { icon: '[偏緊張]', mood: '快要進入極限，建議盡快規劃下一筆額度', color: 'yellow' };
+  const number = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function roundNumber(value, digits = 2) {
+  return Number(value.toFixed(digits));
+}
+
+function normalizePercent(value) {
+  const number = toFiniteNumber(value);
+  if (number === null) {
+    return null;
   }
 
-  return { icon: '[穩定]', mood: '目前充足，維持節奏即可', color: 'green' };
+  return roundNumber(Math.min(100, Math.max(0, number)));
+}
+
+function normalizeNonNegativeNumber(value) {
+  const number = toFiniteNumber(value);
+  if (number === null) {
+    return null;
+  }
+
+  return Math.max(0, roundNumber(number));
+}
+
+function normalizeResetAt(value) {
+  const number = toFiniteNumber(value);
+  if (number !== null) {
+    return Math.floor(Math.abs(number) > 100000000000 ? number / 1000 : number);
+  }
+
+  if (typeof value === 'string') {
+    const timestamp = Date.parse(value);
+    if (!Number.isNaN(timestamp)) {
+      return Math.floor(timestamp / 1000);
+    }
+  }
+
+  return null;
+}
+
+function normalizeUsageWindow(window, name) {
+  const source = isObject(window) ? window : {};
+  const usedPercent = normalizePercent(source.used_percent);
+
+  return {
+    name,
+    used_percent: usedPercent,
+    remaining_percent: usedPercent === null ? null : roundNumber(100 - usedPercent),
+    limit_window_seconds: normalizeNonNegativeNumber(source.limit_window_seconds),
+    reset_after_seconds: normalizeNonNegativeNumber(source.reset_after_seconds),
+    reset_at: normalizeResetAt(source.reset_at),
+  };
+}
+
+function getFirstValue(source, keys) {
+  if (!isObject(source)) {
+    return null;
+  }
+
+  for (const key of keys) {
+    if (source[key] !== null && source[key] !== undefined) {
+      return source[key];
+    }
+  }
+
+  return null;
+}
+
+function getAdditionalRateLimitCollection(response) {
+  const candidates = [
+    response.additional_rate_limits,
+    response.rate_limit && response.rate_limit.additional_rate_limits,
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate;
+    }
+
+    if (isObject(candidate)) {
+      return Object.entries(candidate).map(([key, value]) => {
+        if (!isObject(value)) {
+          return value;
+        }
+
+        return {
+          ...value,
+          limit_name: getFirstValue(value, ['limit_name', 'name', 'id']) || key,
+        };
+      });
+    }
+  }
+
+  return [];
+}
+
+function getAdditionalRateLimitWindow(limit, windowKey) {
+  const candidates = [
+    limit,
+    isObject(limit) && isObject(limit.rate_limit) ? limit.rate_limit : null,
+    isObject(limit) && isObject(limit.rateLimit) ? limit.rateLimit : null,
+  ];
+  const camelKey = windowKey === 'primary_window' ? 'primaryWindow' : 'secondaryWindow';
+
+  for (const candidate of candidates) {
+    const window = getFirstValue(candidate, [windowKey, camelKey]);
+    if (isObject(window)) {
+      return window;
+    }
+  }
+
+  return null;
+}
+
+function getAdditionalRateLimitDirectWindow(limit) {
+  if (!isObject(limit)) {
+    return null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(limit, 'used_percent')) {
+    return limit;
+  }
+
+  if (isObject(limit.window)) {
+    return limit.window;
+  }
+
+  if (isObject(limit.rate_limit) && Object.prototype.hasOwnProperty.call(limit.rate_limit, 'used_percent')) {
+    return limit.rate_limit;
+  }
+
+  return null;
+}
+
+function normalizeAdditionalRateLimitName(value, id) {
+  const rawName = value === null || value === undefined ? '' : String(value);
+  const identity = `${id} ${rawName}`.toLowerCase();
+
+  if (identity.includes('spark')) {
+    return 'GPT-5.3-Codex-Spark';
+  }
+
+  return rawName || id;
+}
+
+function normalizeAdditionalRateLimits(response) {
+  return getAdditionalRateLimitCollection(response)
+    .map((limit, index) => {
+      if (!isObject(limit)) {
+        return null;
+      }
+
+      const rawId = getFirstValue(limit, ['limit_name', 'metered_limit_name', 'name', 'id']);
+      const id = rawId === null || rawId === undefined || rawId === ''
+        ? `additional-${index + 1}`
+        : String(rawId);
+      const name = normalizeAdditionalRateLimitName(
+        getFirstValue(limit, ['display_name', 'title', 'name', 'limit_name', 'metered_limit_name']),
+        id
+      );
+      const identity = `${id} ${name}`.toLowerCase();
+      const isWeekly = identity.includes('weekly') || identity.includes('secondary');
+      const directWindow = getAdditionalRateLimitDirectWindow(limit);
+      let primarySource = getAdditionalRateLimitWindow(limit, 'primary_window');
+      let secondarySource = getAdditionalRateLimitWindow(limit, 'secondary_window');
+
+      if (!primarySource && !secondarySource && directWindow) {
+        if (isWeekly) {
+          secondarySource = directWindow;
+        } else {
+          primarySource = directWindow;
+        }
+      }
+
+      return {
+        id,
+        name,
+        primary_window: primarySource
+          ? normalizeUsageWindow(primarySource, '目前工作階段')
+          : null,
+        secondary_window: secondarySource
+          ? normalizeUsageWindow(secondarySource, '每週額度')
+          : null,
+      };
+    })
+    .filter(Boolean);
+}
+
+function normalizeUsageResponse(response) {
+  if (!isObject(response) || !isObject(response.rate_limit)) {
+    throw new Error('使用額度 API 回傳格式非預期：缺少 rate_limit');
+  }
+
+  return {
+    primary_window: normalizeUsageWindow(response.rate_limit.primary_window, '目前工作階段'),
+    secondary_window: normalizeUsageWindow(response.rate_limit.secondary_window, '每週額度'),
+    additional_rate_limits: normalizeAdditionalRateLimits(response),
+  };
+}
+
+function formatPercent(value) {
+  return value === null || value === undefined ? 'N/A' : `${value}%`;
+}
+
+function formatCompactDurationFromSeconds(seconds) {
+  let totalMinutes = Math.floor(Math.max(0, seconds) / 60);
+  if (totalMinutes === 0 && seconds > 0) {
+    totalMinutes = 1;
+  }
+
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  const parts = [];
+
+  if (days > 0) {
+    parts.push(`${days}d`);
+  }
+  if (hours > 0 || days > 0) {
+    parts.push(`${hours}h`);
+  }
+  if (minutes > 0 || parts.length === 0) {
+    parts.push(`${minutes}m`);
+  }
+
+  return parts.join(' ');
+}
+
+function getUsageResetSeconds(window) {
+  if (!isObject(window)) {
+    return null;
+  }
+
+  if (window.reset_at !== null && window.reset_at !== undefined) {
+    return window.reset_at - Math.floor(Date.now() / 1000);
+  }
+
+  if (window.reset_after_seconds !== null && window.reset_after_seconds !== undefined) {
+    return window.reset_after_seconds;
+  }
+
+  return null;
+}
+
+function formatUsageReset(window) {
+  const seconds = getUsageResetSeconds(window);
+  if (seconds === null) {
+    return '重置時間：未提供';
+  }
+
+  if (seconds <= 0) {
+    return '已到重置時間';
+  }
+
+  return `約 ${formatCompactDurationFromSeconds(seconds)} 後重置`;
+}
+
+function getUsageColor(usedPercent) {
+  if (usedPercent === null || usedPercent === undefined) {
+    return 'yellow';
+  }
+
+  if (usedPercent >= 90) {
+    return 'red';
+  }
+
+  if (usedPercent >= 75) {
+    return 'yellow';
+  }
+
+  return 'green';
+}
+
+const USAGE_CARD_WIDTH = 42;
+const USAGE_BAR_WIDTH = 28;
+const USAGE_CARD_GAP = 2;
+
+function getCurrentTerminalWidth() {
+  if (!process.stdout) {
+    return 0;
+  }
+
+  const columns = Number(process.stdout.columns);
+  return Number.isFinite(columns) && columns > 0 ? Math.floor(columns) : 0;
+}
+
+function buildUsageProgressBar(remainingPercent, width = USAGE_BAR_WIDTH, color = 'green') {
+  if (remainingPercent === null || remainingPercent === undefined) {
+    return paint('gray', '─'.repeat(width));
+  }
+
+  const filledWidth = Math.round((width * remainingPercent) / 100);
+  return `${paint(color, '█'.repeat(filledWidth))}${paint(
+    'gray',
+    '░'.repeat(Math.max(0, width - filledWidth))
+  )}`;
+}
+
+function getUsageCardTitle(label, windowType) {
+  const suffix = windowType === 'primary' ? '5 小時使用情況限制' : '每週用量上限';
+
+  if (label === '目前工作階段' || label === '每週額度') {
+    return suffix;
+  }
+
+  return `${label} ${suffix}`;
+}
+
+function centerText(value, width) {
+  const text = String(value);
+  const padding = Math.max(0, width - textDisplayWidth(text));
+  const leftPadding = Math.floor(padding / 2);
+  const rightPadding = padding - leftPadding;
+  return `${' '.repeat(leftPadding)}${text}${' '.repeat(rightPadding)}`;
+}
+
+function buildRoundedBoxLines(contentLines, contentWidth) {
+  const safeWidth = Math.max(
+    contentWidth,
+    ...contentLines.map((line) => textDisplayWidth(line))
+  );
+  const top = `╭${'─'.repeat(safeWidth + 2)}╮`;
+  const bottom = `╰${'─'.repeat(safeWidth + 2)}╯`;
+  const body = contentLines.map((line) => {
+    const text = String(line);
+    const padding = Math.max(0, safeWidth - textDisplayWidth(text));
+    return `│ ${text}${' '.repeat(padding)} │`;
+  });
+
+  return [paint('bold', top), ...body, paint('bold', bottom)];
+}
+
+function buildUsageCardLines(title, window, contentWidth = USAGE_CARD_WIDTH) {
+  const color = getUsageColor(window.used_percent);
+  const remaining = formatPercent(window.remaining_percent);
+  const used = formatPercent(window.used_percent);
+  const reset = formatUsageReset(window)
+    .replace(/^重置時間：/, '')
+    .replace(/重置$/, '重設');
+  const contentLines = [
+    paint('dim', title),
+    `${paint(color, remaining)} ${paint('dim', '剩餘')} ${paint('gray', `・已使用 ${used}`)}`,
+    buildUsageProgressBar(window.remaining_percent, USAGE_BAR_WIDTH, color),
+    `${paint('dim', '重設時間')} ${paint('gray', reset)}`,
+  ];
+  return buildRoundedBoxLines(contentLines, contentWidth);
+}
+
+function getUsageLayout(cards, maxTotalWidth = 0) {
+  const terminalWidth = getCurrentTerminalWidth();
+  const naturalCardWidth = Math.max(
+    USAGE_CARD_WIDTH,
+    ...cards.map((card) => textDisplayWidth(card.title))
+  );
+  const availableWidth = maxTotalWidth > 0
+    ? terminalWidth > 0
+      ? Math.min(terminalWidth, maxTotalWidth)
+      : maxTotalWidth
+    : terminalWidth;
+
+  if (!availableWidth) {
+    return {
+      cardContentWidth: naturalCardWidth,
+      boxContentWidth: naturalCardWidth,
+      terminalWidth: 0,
+      twoColumns: false,
+    };
+  }
+
+  const twoColumnContentWidth = Math.floor(
+    (availableWidth - USAGE_CARD_GAP - 8) / 2
+  );
+  if (cards.length >= 2 && twoColumnContentWidth >= naturalCardWidth) {
+    return {
+      cardContentWidth: twoColumnContentWidth,
+      boxContentWidth: availableWidth - 4,
+      terminalWidth: availableWidth,
+      twoColumns: true,
+    };
+  }
+
+  return {
+    cardContentWidth: Math.max(1, availableWidth - 4),
+    boxContentWidth: availableWidth - 4,
+    terminalWidth: availableWidth,
+    twoColumns: false,
+  };
+}
+
+function printUsageCards(cards, layout = getUsageLayout(cards)) {
+  const normalizedCards = cards.map((card) => ({
+    lines: buildUsageCardLines(card.title, card.window, layout.cardContentWidth),
+  }));
+
+  if (layout.twoColumns) {
+    printCreditCardsInTwoColumns(
+      normalizedCards,
+      layout.terminalWidth,
+      layout.cardContentWidth,
+      USAGE_CARD_GAP
+    );
+    return;
+  }
+
+  printCreditCardsInSingleColumn(normalizedCards);
+}
+
+function getUsageCards(usage) {
+  if (!usage) {
+    return [];
+  }
+
+  const cards = [];
+  if (usage.primary_window) {
+    cards.push({
+      title: getUsageCardTitle(usage.primary_window.name, 'primary'),
+      window: usage.primary_window,
+    });
+  }
+  if (usage.secondary_window) {
+    cards.push({
+      title: getUsageCardTitle(usage.secondary_window.name, 'secondary'),
+      window: usage.secondary_window,
+    });
+  }
+
+  const additionalRateLimits = Array.isArray(usage.additional_rate_limits)
+    ? usage.additional_rate_limits
+    : [];
+  additionalRateLimits.forEach((limit) => {
+    if (limit.primary_window) {
+      cards.push({
+        title: getUsageCardTitle(limit.name, 'primary'),
+        window: limit.primary_window,
+      });
+    }
+    if (limit.secondary_window) {
+      cards.push({
+        title: getUsageCardTitle(limit.name, 'secondary'),
+        window: limit.secondary_window,
+      });
+    }
+  });
+
+  return cards;
+}
+
+function printUsageSection(usage, layout) {
+  console.log(paint('bold', '使用額度'));
+
+  const cards = getUsageCards(usage);
+  if (!cards.length) {
+    console.log('- 使用額度資料不可用');
+    return;
+  }
+
+  printUsageCards(cards, layout || getUsageLayout(cards));
 }
 
 function parseStatusMood(status) {
@@ -474,9 +985,9 @@ function printCreditCardsInSingleColumn(cards) {
   });
 }
 
-function printCreditCardsInTwoColumns(cards, terminalWidth, cardWidth) {
+function printCreditCardsInTwoColumns(cards, terminalWidth, cardWidth, gap = CREDIT_GAP) {
   const cardOuterWidth = cardWidth + 4;
-  const canTwoColumns = cards.length >= 2 && terminalWidth >= cardOuterWidth * 2 + CREDIT_GAP;
+  const canTwoColumns = cards.length >= 2 && terminalWidth >= cardOuterWidth * 2 + gap;
 
   if (!canTwoColumns) {
     return false;
@@ -492,15 +1003,15 @@ function printCreditCardsInTwoColumns(cards, terminalWidth, cardWidth) {
     for (let row = 0; row < rowHeight; row += 1) {
       const leftLine = left[row] || '';
       const rightLine = right ? right[row] : '';
-      const gap = right ? ' '.repeat(CREDIT_GAP) : '';
-      console.log(`${leftLine}${gap}${rightLine}`);
+      const columnGap = right ? ' '.repeat(gap) : '';
+      console.log(`${leftLine}${columnGap}${rightLine}`);
     }
   }
 
   return true;
 }
 
-function printHeader(availableCount, availableColor) {
+function printHeader(contentWidth = null) {
   const now = new Date();
   const tzOffsetMinutes = -now.getTimezoneOffset();
   const sign = tzOffsetMinutes >= 0 ? '+' : '-';
@@ -508,25 +1019,31 @@ function printHeader(availableCount, availableColor) {
   const nowText = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(
     now.getHours()
   )}:${pad(now.getMinutes())}:${pad(now.getSeconds())} ${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+  const terminalWidth = getCurrentTerminalWidth();
+  const resolvedContentWidth = contentWidth ||
+    (terminalWidth ? Math.max(1, terminalWidth - 4) : USAGE_CARD_WIDTH);
+  const title = centerText(
+    paint('bold', `Codex 額度查詢 (v${APP_VERSION})`),
+    resolvedContentWidth
+  );
+  const lines = buildRoundedBoxLines(
+    [
+      title,
+      `${paint('dim', '查詢時間')}：${paint('cyan', nowText)}`,
+    ],
+    resolvedContentWidth
+  );
 
-  console.log(paint('bold', `┏━ Codex 手動重置額度查詢 (v${APP_VERSION}) ━━━━━━━━━━━━━━━━━━`));
-  console.log(`${paint('dim', '查詢時間')}：${paint('cyan', nowText)}`);
-  const count = Number.parseInt(availableCount, 10);
-  const hasAvailableCount = Number.isFinite(count);
-  const availableLabel = hasAvailableCount ? '可用額度' : '可用資料';
-  const availableText = hasAvailableCount
-    ? `${paint(availableColor || 'yellow', count)}${paint('dim', ' 次')}`
-    : paint(availableColor || 'yellow', availableCount);
-  console.log(`${paint('dim', availableLabel)}：${availableText}`);
-  console.log(paint('bold', '┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'));
+  lines.forEach((line) => console.log(line));
 }
 
-function printCredits(credits) {
-  if (!credits.length) {
-    return;
-  }
+function printManualResetSection(credits, layout) {
+  console.log(paint('bold', '手動重置額度'));
+  printCredits(credits, layout);
+}
 
-  const prepared = credits
+function prepareCreditCards(credits) {
+  const prepared = (Array.isArray(credits) ? credits : [])
     .map((credit, index) => {
       if (!credit || typeof credit !== 'object') {
         return null;
@@ -542,22 +1059,51 @@ function printCredits(credits) {
     .filter(Boolean);
 
   if (!prepared.length) {
-    return;
+    return {
+      cards: [],
+      contentWidth: CREDIT_WIDTH,
+    };
   }
 
   const maxContentWidth = Math.max(...prepared.map((item) => item.width));
-  const cards = prepared.map((item) => ({
-    lines: buildCreditCardLines(item.lines, maxContentWidth),
-  }));
-  const terminalWidth =
-    process.stdout && process.stdout.isTTY && typeof process.stdout.columns === 'number'
-      ? process.stdout.columns
-      : 0;
-  if (printCreditCardsInTwoColumns(cards, terminalWidth, maxContentWidth)) {
+  return {
+    cards: prepared.map((item) => ({
+      lines: buildCreditCardLines(item.lines, maxContentWidth),
+    })),
+    contentWidth: maxContentWidth,
+  };
+}
+
+function getManualResetLayout(credits) {
+  const prepared = prepareCreditCards(credits);
+  const terminalWidth = getCurrentTerminalWidth();
+  const cardOuterWidth = prepared.contentWidth + 4;
+  const twoColumns =
+    prepared.cards.length >= 2 && terminalWidth >= cardOuterWidth * 2 + CREDIT_GAP;
+  const totalWidth = twoColumns
+    ? cardOuterWidth * 2 + CREDIT_GAP
+    : cardOuterWidth;
+
+  return {
+    ...prepared,
+    terminalWidth,
+    twoColumns,
+    totalWidth,
+    boxContentWidth: totalWidth - 4,
+  };
+}
+
+function printCredits(credits, layout = getManualResetLayout(credits)) {
+  if (!layout.cards.length) {
     return;
   }
 
-  printCreditCardsInSingleColumn(cards);
+  if (layout.twoColumns) {
+    printCreditCardsInTwoColumns(layout.cards, layout.terminalWidth, layout.contentWidth);
+    return;
+  }
+
+  printCreditCardsInSingleColumn(layout.cards);
 }
 
 async function main() {
@@ -575,30 +1121,64 @@ async function main() {
     process.exit(1);
   }
 
-  let result;
-  try {
-    result = await requestRateLimit(accessToken, accountId);
-  } catch (error) {
-    console.error(paint('red', `錯誤：${error.message}`));
+  const [rateLimitRequest, usageRequest] = await Promise.allSettled([
+    requestRateLimit(accessToken, accountId),
+    requestUsage(accessToken, accountId),
+  ]);
+
+  if (rateLimitRequest.status === 'rejected') {
+    const message = sanitizeSensitiveText(getErrorMessage(rateLimitRequest.reason), [
+      accessToken,
+      accountId,
+    ]);
+    console.error(paint('red', `錯誤：${message}`));
     process.exit(1);
   }
 
+  const result = rateLimitRequest.value;
   if (!result || typeof result !== 'object') {
     console.error(paint('red', '錯誤：API 回傳格式非預期'));
     process.exit(1);
   }
 
+  let usage = null;
+  let usageRaw = null;
+  let usageError = null;
+
+  if (usageRequest.status === 'fulfilled') {
+    usageRaw = usageRequest.value;
+    try {
+      usage = normalizeUsageResponse(usageRequest.value);
+    } catch (error) {
+      usageError = error;
+    }
+  } else {
+    usageError = usageRequest.reason;
+  }
+
+  if (usageError) {
+    const message = sanitizeSensitiveText(getErrorMessage(usageError), [accessToken, accountId]);
+    console.error(paint('yellow', `警告：使用額度查詢失敗，仍顯示手動重置額度。${message}`));
+  }
+
   if (options.json) {
-    console.log(JSON.stringify(result));
+    const output = {
+      ...result,
+      usage,
+      usage_raw: usageRaw,
+    };
+
+    if (usageError) {
+      output.usage_error = sanitizeSensitiveText(getErrorMessage(usageError), [
+        accessToken,
+        accountId,
+      ]);
+    }
+
+    console.log(JSON.stringify(output));
     return;
   }
 
-  const availableCount = Object.prototype.hasOwnProperty.call(result, 'available_count')
-    ? result.available_count
-    : 'N/A';
-  const countMood = parseAvailableMood(availableCount);
-
-  printHeader(availableCount, countMood.color);
   const credits = Array.isArray(result.credits)
     ? result.credits
     : Array.isArray(result.items)
@@ -606,8 +1186,34 @@ async function main() {
       : Array.isArray(result.data)
         ? result.data
         : [];
-  console.log(paint('dim', '額度清單'));
-  printCredits(credits);
+
+  const manualResetLayout = getManualResetLayout(credits);
+  const usageCards = getUsageCards(usage);
+  const usageLayout = getUsageLayout(usageCards, manualResetLayout.totalWidth);
+
+  printHeader(usageLayout.boxContentWidth);
+  printUsageSection(usage, usageLayout);
+  console.log('');
+  printManualResetSection(credits, manualResetLayout);
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  buildApiHeaders,
+  buildRoundedBoxLines,
+  formatCompactDurationFromSeconds,
+  formatUsageReset,
+  getCurrentTerminalWidth,
+  getManualResetLayout,
+  getUsageLayout,
+  main,
+  normalizeUsageResponse,
+  normalizeUsageWindow,
+  requestJson,
+  requestRateLimit,
+  requestUsage,
+  sanitizeSensitiveText,
+};

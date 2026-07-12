@@ -1,7 +1,7 @@
 {
   "name": "@willh/codex-reset-checker",
-  "version": "0.2.3",
-  "description": "Query Codex/ChatGPT manual reset credits and expiry schedule from local auth.json.",
+  "version": "0.3.0",
+  "description": "Query Codex/ChatGPT usage limits, manual reset credits, and expiry schedule from local auth.json.",
   "author": "Will 保哥",
   "repository": {
     "type": "git",
@@ -12,15 +12,20 @@
     "codex-reset-checker": "bin/codex-reset-checker.js"
   },
   "main": "bin/codex-reset-checker.js",
+  "scripts": {
+    "test": "node test/codex-reset-checker.test.js"
+  },
   "files": [
     "bin",
     "scripts",
+    "test",
     "README.md"
   ],
   "keywords": [
     "codex",
     "chatgpt",
     "rate-limit",
+    "usage",
     "reset-credits",
     "auth"
   ],

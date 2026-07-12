@@ -1,10 +1,15 @@
-# Codex 手動重置次數查詢工具
+# Codex 額度查詢工具
 
 ## 專案介紹
 
-這是用來查詢 Codex/ChatGPT 手動重置額度與到期時間的 CLI 工具，重點在於快速、穩定地取得目前可用額度資訊。
+這是用來查詢 Codex/ChatGPT 使用額度與手動重置額度的 CLI 工具，重點在於快速取得目前額度資訊。
 
-工具會讀取本機 Codex 登入資訊中的存取權杖，呼叫 ChatGPT 後端 API 取得目前可用的手動重置額度清單，並以終端機友善格式顯示每筆額度的取得時間、到期時間與剩餘時間。整個流程只做查詢，不會修改本機檔案，也不會輸出 `access_token` 或 `account_id`。
+工具會讀取本機 Codex 登入資訊中的存取權杖，呼叫 ChatGPT 後端取得以下兩類資料：
+
+- `使用額度`：目前工作階段、每週視窗，以及 API 有提供時的模型專用額度之已使用比例、剩餘比例及重置倒數。
+- `手動重置額度`：可用次數，以及每筆額度的取得時間、到期時間與剩餘時間。
+
+整個流程只做查詢，不會修改本機檔案，也不會輸出 `access_token` 或 `account_id`。
 
 快速開始：
 
@@ -12,7 +17,7 @@
 npx @willh/codex-reset-checker
 ```
 
-![Codex 手動重置額度查詢結果](assets/codex-reset-checker-screenshot.png)
+![Codex 額度查詢結果](assets/codex-reset-checker-screenshot.png)
 
 * * *
 
@@ -40,6 +45,8 @@ npx @willh/codex-reset-checker
 │  └─ codex-reset-checker.js      Node.js CLI 主程式
 ├─ assets/
 │  └─ codex-reset-checker-screenshot.png
+├─ test/
+│  └─ codex-reset-checker.test.js  CLI 與回應解析測試
 ├─ package.json
 └─ README.md
 ```
@@ -78,14 +85,14 @@ codex-reset-checker --auth /path/to/auth.json
 codex-reset-checker /path/to/auth.json
 ```
 
-### 輸出原始 JSON
+### 輸出 JSON
 
 ```bash
 codex-reset-checker --json
 codex-reset-checker --auth /path/to/auth.json --json
 ```
 
-`--json` 會直接輸出 API 回傳結果的單行 JSON，不套用框線、顏色或人性化時間文字，適合交給其他工具處理。
+`--json` 會在保留手動重置 API 原始欄位的前提下，輸出單行 JSON。輸出會新增標準化的 `usage` 欄位，並以 `usage_raw` 保留 `/wham/usage` 的原始回應，適合交給其他工具處理。使用額度查詢失敗時，`usage` 會是 `null`，並新增 `usage_error`；警告會輸出至標準錯誤，不混入 JSON 標準輸出。
 
 ### 不安裝直接執行
 
@@ -113,7 +120,7 @@ codex-reset-checker
 
 ## 4. 執行畫面
 
-![Codex 手動重置額度查詢結果](assets/codex-reset-checker-screenshot.png)
+![Codex 額度查詢結果](assets/codex-reset-checker-screenshot.png)
 
 * * *
 
@@ -144,13 +151,29 @@ codex-reset-checker
 
 請求方法：`GET`
 
-請求 URL：`https://chatgpt.com/backend-api/wham/rate-limit-reset-credits`
+請求 URL：
+
+- 手動重置額度：`https://chatgpt.com/backend-api/wham/rate-limit-reset-credits`
+- 使用額度：`https://chatgpt.com/backend-api/wham/usage`
+
+其中 `/wham/usage` 是 ChatGPT 後端的非公開端點，僅依目前 Codex 用戶端可觀察到的回應格式解析。GPT-5.3-Codex-Spark 只有在帳號與當次回應包含相應的 `additional_rate_limits` 時才會顯示，不會從一般額度推算 Spark 用量。
 
 * * *
 
 ## 7. 輸出欄位與格式
 
-程式只回報下列欄位：
+終端機輸出分成 `使用額度` 與 `手動重置額度` 兩個區段。
+
+使用額度會解析 `/wham/usage` 回應中的 `rate_limit` 與 `additional_rate_limits`：
+
+- `primary_window`：目前工作階段。
+- `secondary_window`：每週額度。
+- `additional_rate_limits`：額外的模型專用額度；包含 GPT-5.3-Codex-Spark 時，會顯示其目前工作階段與每週額度。
+- `used_percent`：已使用百分比。
+- `remaining_percent`：依 `100 - used_percent` 計算的剩餘百分比。
+- `limit_window_seconds`、`reset_after_seconds`、`reset_at`：視窗與重置資訊；缺少或無法解析時顯示 `N/A`。
+
+手動重置額度保留原有欄位：
 
 - `available_count`
 - 每筆 `credit` 的 `granted_at`
@@ -158,14 +181,42 @@ codex-reset-checker
 - 每筆 `credit` 的 `status`
 - `expires_at` 會同時附上精簡剩餘時間（例如：`剩餘 2d 3h 20m`、`到期已過 10m`）
 
+使用額度會以框線表格卡片呈現：剩餘百分比、已使用比例、Progress Bar 與重設時間會放在同一張卡片內。CLI 會讀取目前終端機的欄數，寬度足夠時使用兩欄，寬度不足時自動改為單欄；標頭與使用額度卡片會共用相同的總寬度，且最大不超過「手動重置額度」的實際版面寬度。
+
 輸出範例：
 
 ```text
-┏━ Codex 手動重置額度查詢結果 ━━━━━━━━━━━━━━━━━━━
-查詢時間：2026-06-29 14:00:00 +08:00
-可用額度：2 次
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-額度清單
+╭────────────────────────────────────────────╮
+│             Codex 額度查詢 (v0.3.0)         │
+│ 查詢時間：2026-06-29 14:00:00 +08:00       │
+╰────────────────────────────────────────────╯
+使用額度
+╭────────────────────────────────────────────╮
+│ 5 小時使用情況限制                         │
+│ 58% 剩餘 ・已使用 42%                       │
+│ ████████████████░░░░░░░░                   │
+│ 重設時間 約 2h 15m 後重設                  │
+╰────────────────────────────────────────────╯
+╭────────────────────────────────────────────╮
+│ 每週用量上限                               │
+│ 82% 剩餘 ・已使用 18%                       │
+│ ███████████████████████░░░░░               │
+│ 重設時間 約 4d 8h 後重設                   │
+╰────────────────────────────────────────────╯
+╭────────────────────────────────────────────╮
+│ GPT-5.3-Codex-Spark 5 小時使用情況限制     │
+│ 88% 剩餘 ・已使用 12%                       │
+│ █████████████████████████░░░               │
+│ 重設時間 約 2h 後重設                      │
+╰────────────────────────────────────────────╯
+╭────────────────────────────────────────────╮
+│ GPT-5.3-Codex-Spark 每週用量上限           │
+│ 92% 剩餘 ・已使用 8%                        │
+│ ██████████████████████████░░               │
+│ 重設時間 約 3d 後重設                      │
+╰────────────────────────────────────────────╯
+
+手動重置額度
 ┌────────────────────────────────────────────────────────┐
 │ #001                                                   │
 │ [可用] status=active 仍在有效                         │
@@ -183,18 +234,34 @@ codex-reset-checker
 無資料時：
 
 ```text
-┏━ Codex 手動重置額度查詢結果 ━━━━━━━━━━━━━━━━━━━
-查詢時間：2026-06-29 14:00:00 +08:00
-可用額度：0 次
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-額度清單
+╭────────────────────────────────────────────╮
+│             Codex 額度查詢 (v0.3.0)         │
+│ 查詢時間：2026-06-29 14:00:00 +08:00       │
+╰────────────────────────────────────────────╯
+使用額度
+╭────────────────────────────────────────────╮
+│ 5 小時使用情況限制                         │
+│ N/A 剩餘 ・已使用 N/A                      │
+│ ────────────────────────────               │
+│ 重設時間 未提供                            │
+╰────────────────────────────────────────────╯
+╭────────────────────────────────────────────╮
+│ 每週用量上限                               │
+│ N/A 剩餘 ・已使用 N/A                      │
+│ ────────────────────────────               │
+│ 重設時間 未提供                            │
+╰────────────────────────────────────────────╯
+
+手動重置額度
 ```
 
 JSON 輸出範例：
 
 ```json
-{"available_count":2,"credits":[{"granted_at":"2026-06-29T04:03:15Z","expires_at":"2026-07-06T04:03:15Z","status":"active"}]}
+{"available_count":2,"credits":[{"granted_at":"2026-06-29T04:03:15Z","expires_at":"2026-07-06T04:03:15Z","status":"active"}],"usage":{"primary_window":{"name":"目前工作階段","used_percent":42,"remaining_percent":58,"limit_window_seconds":18000,"reset_after_seconds":8100,"reset_at":1762147153},"secondary_window":{"name":"每週額度","used_percent":18,"remaining_percent":82,"limit_window_seconds":604800,"reset_after_seconds":345600,"reset_at":1762650589},"additional_rate_limits":[{"id":"codex-spark","name":"GPT-5.3-Codex-Spark","primary_window":{"name":"目前工作階段","used_percent":12,"remaining_percent":88,"limit_window_seconds":18000,"reset_after_seconds":7200,"reset_at":1762143553},"secondary_window":{"name":"每週額度","used_percent":8,"remaining_percent":92,"limit_window_seconds":604800,"reset_after_seconds":259200,"reset_at":1762391653}}]},"usage_raw":{"plan_type":"pro","rate_limit":{"primary_window":{"used_percent":42,"limit_window_seconds":18000,"reset_after_seconds":8100,"reset_at":1762147153},"secondary_window":{"used_percent":18,"limit_window_seconds":604800,"reset_after_seconds":345600,"reset_at":1762650589}},"additional_rate_limits":[{"limit_name":"codex-spark","primary_window":{"used_percent":12,"limit_window_seconds":18000,"reset_after_seconds":7200,"reset_at":1762143553},"secondary_window":{"used_percent":8,"limit_window_seconds":604800,"reset_after_seconds":259200,"reset_at":1762391653}}]}}
 ```
+
+`usage_raw` 會保留使用額度端點的原始回應，避免標準化欄位遺失後端未來新增的資料。手動重置端點的原始欄位則直接保留在 JSON 頂層。
 
 * * *
 
@@ -207,8 +274,11 @@ JSON 輸出範例：
 - `錯誤：讀取或解析 auth.json 失敗：...`
 - `錯誤：請求 API 失敗，HTTP 401 Unauthorized...`
 - `錯誤：請求 API 失敗，HTTP 403 Forbidden...`
+- `警告：使用額度查詢失敗，仍顯示手動重置額度。...`
 
-若收到 401/403，多半是 token 過期、登入權限問題或會話已失效，請先在 Codex 端重新登入，確認 `~/.codex/auth.json` 已更新。
+手動重置額度查詢失敗時，程式會以非零狀態退出。使用額度查詢是附加流程；若該端點收到 401、429、5xx 或回應格式無法解析，程式仍會顯示手動重置額度。`--json` 模式會以 `usage: null` 與 `usage_error` 表示這個狀態。
+
+若收到 401/403，多半是 Token 過期、登入權限問題或會話已失效，請先在 Codex 端重新登入，確認 `~/.codex/auth.json` 已更新。錯誤回應中的 Token 與帳號識別值會遮罩，不會輸出。
 
 * * *
 
@@ -219,7 +289,8 @@ JSON 輸出範例：
 - 查詢時間格式：`yyyy-MM-dd HH:mm:ss +HH:MM`
 - `granted_at` 與 `expires_at` 格式：`yyyy-MM-dd HH:mm`
 - 失敗解析時保留原始值，不中斷輸出
-- `--json` 模式不轉換時間格式，直接保留 API 回傳值
+- `使用額度` 以 `reset_at` 計算距離重置的倒數；若缺少 `reset_at`，改用 `reset_after_seconds`
+- `usage_raw` 與手動重置資料在 `--json` 模式保留 API 原始值
 
 * * *
 
@@ -245,3 +316,5 @@ npm publish --access public
 - 不輸出 `access_token` 或 `account_id`
 - 只讀取本機 `auth.json`
 - 無資料持久化、無快取、無遙測
+
+`/wham/usage` 並非 OpenAI 公開 API，回應格式、權限與可用性可能變更。這項功能顯示的是 Codex 工作階段與週期的使用額度，不宣稱為可購買 Credits 的餘額。OpenAI 官方目前說明可在 ChatGPT 的 Codex Settings > Usage Dashboard 查看 Credits 餘額，未提供本工具可依賴的公開 Access Token API：[Using Credits for Flexible Usage in ChatGPT](https://help.openai.com/en/articles/12642688-using-credits-for-flexible-usage-in-chatgpt-plus-pro)。
