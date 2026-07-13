@@ -11,6 +11,8 @@ const USAGE_API_URL = 'https://chatgpt.com/backend-api/wham/usage';
 const COLOR = process.stdout && process.stdout.isTTY && !process.env.NO_COLOR;
 const CREDIT_WIDTH = 54;
 const CREDIT_GAP = 2;
+const WATCH_INTERVAL_MS = 60_000;
+const RESIZE_DEBOUNCE_MS = 100;
 const APP_VERSION = (() => {
   try {
     const pkgPath = path.join(__dirname, '..', 'package.json');
@@ -58,12 +60,14 @@ function printUsage() {
 選項：
   --auth <path>   指定 auth.json 路徑（未提供則依作業系統自動判斷）
   --json          以單行 JSON 輸出查詢結果與標準化使用額度
+  -w, --watch     持續監看，每分鐘或終端機尺寸變更時自動刷新
   -h, --help      顯示說明`);
 }
 
 function getCliOptions(cliArgs) {
   let authPath = null;
   let json = false;
+  let watch = false;
 
   for (let i = 0; i < cliArgs.length; i++) {
     const arg = cliArgs[i];
@@ -75,6 +79,11 @@ function getCliOptions(cliArgs) {
 
     if (arg === '--json') {
       json = true;
+      continue;
+    }
+
+    if (arg === '--watch' || arg === '-w') {
+      watch = true;
       continue;
     }
 
@@ -90,7 +99,7 @@ function getCliOptions(cliArgs) {
   }
 
   if (authPath) {
-    return { authPath, json };
+    return { authPath, json, watch };
   }
 
   const home = process.platform === 'win32'
@@ -100,6 +109,7 @@ function getCliOptions(cliArgs) {
   return {
     authPath: path.join(home, '.codex', 'auth.json'),
     json,
+    watch,
   };
 }
 
@@ -258,16 +268,14 @@ function humanizeRemaining(expireValue) {
 
 function loadAuth(authPath) {
   if (!fs.existsSync(authPath)) {
-    console.error(paint('red', `錯誤：找不到 auth.json：${authPath}`));
-    process.exit(1);
+    throw new Error(`找不到 auth.json：${authPath}`);
   }
 
   try {
     const raw = fs.readFileSync(authPath, 'utf8');
     return JSON.parse(raw);
   } catch (error) {
-    console.error(paint('red', `錯誤：讀取或解析 auth.json 失敗：${error.message}`));
-    process.exit(1);
+    throw new Error(`讀取或解析 auth.json 失敗：${error.message}`);
   }
 }
 
@@ -698,6 +706,28 @@ function getCurrentTerminalWidth() {
 
   const columns = Number(process.stdout.columns);
   return Number.isFinite(columns) && columns > 0 ? Math.floor(columns) : 0;
+}
+
+function getTerminalSize(output = process.stdout) {
+  const normalizeDimension = (value) => {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
+  };
+
+  return {
+    columns: output ? normalizeDimension(output.columns) : 0,
+    rows: output ? normalizeDimension(output.rows) : 0,
+  };
+}
+
+function terminalSizeChanged(previous, current) {
+  return previous.columns !== current.columns || previous.rows !== current.rows;
+}
+
+function clearTerminal(output = process.stdout) {
+  if (output && typeof output.write === 'function') {
+    output.write('\x1b[2J\x1b[H');
+  }
 }
 
 function buildUsageProgressBar(remainingPercent, width = USAGE_BAR_WIDTH, color = 'green') {
@@ -1139,9 +1169,7 @@ function printCredits(credits, layout = getManualResetLayout(credits)) {
   printCreditCardsInSingleColumn(layout.cards);
 }
 
-async function main() {
-  const args = process.argv.slice(2);
-  const options = getCliOptions(args);
+async function runOnce(options) {
   const authPath = options.authPath;
   const auth = loadAuth(authPath);
 
@@ -1150,8 +1178,7 @@ async function main() {
   const accountId = tokens.account_id;
 
   if (!accessToken) {
-    console.error(paint('red', '錯誤：auth.json 內未找到 tokens.access_token'));
-    process.exit(1);
+    throw new Error('auth.json 內未找到 tokens.access_token');
   }
 
   const [rateLimitRequest, usageRequest] = await Promise.allSettled([
@@ -1164,14 +1191,12 @@ async function main() {
       accessToken,
       accountId,
     ]);
-    console.error(paint('red', `錯誤：${message}`));
-    process.exit(1);
+    throw new Error(message);
   }
 
   const result = rateLimitRequest.value;
   if (!result || typeof result !== 'object') {
-    console.error(paint('red', '錯誤：API 回傳格式非預期'));
-    process.exit(1);
+    throw new Error('API 回傳格式非預期');
   }
 
   let usage = null;
@@ -1230,8 +1255,133 @@ async function main() {
   printManualResetSection(credits, manualResetLayout);
 }
 
+function startWatch(options, dependencies = {}) {
+  const output = dependencies.output || process.stdout;
+  const signalEmitter = dependencies.signalEmitter || process;
+  const refreshFunction = dependencies.refreshFunction || (() => runOnce(options));
+  const setIntervalFunction = dependencies.setIntervalFunction || setInterval;
+  const clearIntervalFunction = dependencies.clearIntervalFunction || clearInterval;
+  const setTimeoutFunction = dependencies.setTimeoutFunction || setTimeout;
+  const clearTimeoutFunction = dependencies.clearTimeoutFunction || clearTimeout;
+  const intervalMs = dependencies.intervalMs || WATCH_INTERVAL_MS;
+  const resizeDebounceMs = dependencies.resizeDebounceMs === undefined
+    ? RESIZE_DEBOUNCE_MS
+    : dependencies.resizeDebounceMs;
+  let previousSize = getTerminalSize(output);
+  let intervalHandle = null;
+  let resizeTimeoutHandle = null;
+  let activeRefresh = null;
+  let refreshPending = false;
+  let stopped = false;
+
+  const refresh = () => {
+    if (stopped) {
+      return Promise.resolve();
+    }
+
+    if (activeRefresh) {
+      refreshPending = true;
+      return activeRefresh;
+    }
+
+    activeRefresh = (async () => {
+      do {
+        refreshPending = false;
+        clearTerminal(output);
+
+        try {
+          await refreshFunction();
+        } catch (error) {
+          console.error(paint('red', `錯誤：刷新失敗：${getErrorMessage(error)}`));
+        }
+      } while (refreshPending && !stopped);
+    })().finally(() => {
+      activeRefresh = null;
+    });
+
+    return activeRefresh;
+  };
+
+  const handleResize = () => {
+    const currentSize = getTerminalSize(output);
+    if (!terminalSizeChanged(previousSize, currentSize)) {
+      return;
+    }
+
+    previousSize = currentSize;
+    if (resizeTimeoutHandle !== null) {
+      clearTimeoutFunction(resizeTimeoutHandle);
+    }
+
+    resizeTimeoutHandle = setTimeoutFunction(() => {
+      resizeTimeoutHandle = null;
+      void refresh();
+    }, resizeDebounceMs);
+  };
+
+  const stop = () => {
+    if (stopped) {
+      return;
+    }
+
+    stopped = true;
+    if (intervalHandle !== null) {
+      clearIntervalFunction(intervalHandle);
+    }
+    if (resizeTimeoutHandle !== null) {
+      clearTimeoutFunction(resizeTimeoutHandle);
+    }
+    if (output && typeof output.removeListener === 'function') {
+      output.removeListener('resize', handleResize);
+    }
+    if (signalEmitter && typeof signalEmitter.removeListener === 'function') {
+      signalEmitter.removeListener('SIGINT', handleSignal);
+      signalEmitter.removeListener('SIGTERM', handleSignal);
+    }
+  };
+
+  const handleSignal = () => {
+    stop();
+    if (output && typeof output.write === 'function') {
+      output.write('\n');
+    }
+  };
+
+  if (output && typeof output.on === 'function') {
+    output.on('resize', handleResize);
+  }
+  if (signalEmitter && typeof signalEmitter.once === 'function') {
+    signalEmitter.once('SIGINT', handleSignal);
+    signalEmitter.once('SIGTERM', handleSignal);
+  }
+
+  intervalHandle = setIntervalFunction(() => {
+    void refresh();
+  }, intervalMs);
+
+  return {
+    ready: refresh(),
+    refresh,
+    stop,
+  };
+}
+
+async function main() {
+  const options = getCliOptions(process.argv.slice(2));
+  if (options.watch) {
+    const watcher = startWatch(options);
+    await watcher.ready;
+    return;
+  }
+
+  await runOnce(options);
+}
+
 if (require.main === module) {
-  main();
+  main().catch((error) => {
+    console.error(paint('red', `錯誤：${getErrorMessage(error)}`));
+    process.exitCode = 1;
+  });
 }
 
 module.exports = {
@@ -1239,8 +1389,10 @@ module.exports = {
   buildRoundedBoxLines,
   formatCompactDurationFromSeconds,
   formatUsageReset,
+  getCliOptions,
   getCurrentTerminalWidth,
   getManualResetLayout,
+  getTerminalSize,
   getUsageCards,
   getUsageLayout,
   main,
@@ -1249,5 +1401,8 @@ module.exports = {
   requestJson,
   requestRateLimit,
   requestUsage,
+  runOnce,
   sanitizeSensitiveText,
+  startWatch,
+  terminalSizeChanged,
 };

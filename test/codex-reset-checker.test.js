@@ -257,6 +257,181 @@ async function testUsageLayoutUsesManualResetWidthCap() {
   assert.strictEqual(usageLayout.twoColumns, false);
 }
 
+async function testWatchCliOptions() {
+  const longOption = checker.getCliOptions(['--watch', '--auth', '/tmp/auth.json']);
+  const shortOption = checker.getCliOptions(['-w', '/tmp/short-auth.json']);
+
+  assert.deepStrictEqual(longOption, {
+    authPath: '/tmp/auth.json',
+    json: false,
+    watch: true,
+  });
+  assert.deepStrictEqual(shortOption, {
+    authPath: '/tmp/short-auth.json',
+    json: false,
+    watch: true,
+  });
+}
+
+async function testWatchRefreshesOnIntervalAndTerminalResize() {
+  const output = new EventEmitter();
+  const signalEmitter = new EventEmitter();
+  const writes = [];
+  const refreshEvents = [];
+  const intervals = [];
+  const timeouts = [];
+  const clearedIntervals = [];
+  const clearedTimeouts = [];
+  output.columns = 120;
+  output.rows = 40;
+  output.write = (value) => {
+    writes.push(value);
+    refreshEvents.push('clear');
+  };
+
+  const watcher = checker.startWatch(
+    { authPath: '/tmp/auth.json', json: false, watch: true },
+    {
+      output,
+      signalEmitter,
+      refreshFunction: async () => {
+        refreshEvents.push('refresh');
+      },
+      setIntervalFunction: (callback, delay) => {
+        intervals.push({ callback, delay });
+        return 'interval-handle';
+      },
+      clearIntervalFunction: (handle) => clearedIntervals.push(handle),
+      setTimeoutFunction: (callback, delay) => {
+        timeouts.push({ callback, delay });
+        return `timeout-${timeouts.length}`;
+      },
+      clearTimeoutFunction: (handle) => clearedTimeouts.push(handle),
+    }
+  );
+
+  await watcher.ready;
+  assert.deepStrictEqual(refreshEvents, ['clear', 'refresh']);
+  assert.strictEqual(writes[0], '\x1b[2J\x1b[H');
+  assert.strictEqual(intervals.length, 1);
+  assert.strictEqual(intervals[0].delay, 60_000);
+
+  intervals[0].callback();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepStrictEqual(refreshEvents.slice(-2), ['clear', 'refresh']);
+
+  output.emit('resize');
+  assert.strictEqual(timeouts.length, 0, '尺寸未變時不應刷新');
+
+  output.columns = 90;
+  output.emit('resize');
+  assert.strictEqual(timeouts.length, 1);
+  assert.strictEqual(timeouts[0].delay, 100);
+  timeouts[0].callback();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepStrictEqual(refreshEvents.slice(-2), ['clear', 'refresh']);
+
+  output.rows = 32;
+  output.emit('resize');
+  assert.strictEqual(timeouts.length, 2, '列數變更也應觸發刷新');
+
+  signalEmitter.emit('SIGINT');
+  assert.deepStrictEqual(clearedIntervals, ['interval-handle']);
+  assert.deepStrictEqual(clearedTimeouts, ['timeout-2']);
+  assert.strictEqual(output.listenerCount('resize'), 0);
+  assert.strictEqual(signalEmitter.listenerCount('SIGTERM'), 0);
+}
+
+async function testWatchQueuesRefreshWithoutOverlappingOutput() {
+  const output = new EventEmitter();
+  const signalEmitter = new EventEmitter();
+  let intervalCallback = null;
+  let resolveFirstRefresh;
+  let activeCalls = 0;
+  let maximumActiveCalls = 0;
+  let refreshCount = 0;
+  output.columns = 80;
+  output.rows = 24;
+  output.write = () => {};
+
+  const watcher = checker.startWatch(
+    { authPath: '/tmp/auth.json', json: false, watch: true },
+    {
+      output,
+      signalEmitter,
+      refreshFunction: async () => {
+        refreshCount += 1;
+        activeCalls += 1;
+        maximumActiveCalls = Math.max(maximumActiveCalls, activeCalls);
+        if (refreshCount === 1) {
+          await new Promise((resolve) => {
+            resolveFirstRefresh = resolve;
+          });
+        }
+        activeCalls -= 1;
+      },
+      setIntervalFunction: (callback) => {
+        intervalCallback = callback;
+        return 1;
+      },
+      clearIntervalFunction: () => {},
+    }
+  );
+
+  intervalCallback();
+  resolveFirstRefresh();
+  await watcher.ready;
+
+  assert.strictEqual(refreshCount, 2);
+  assert.strictEqual(maximumActiveCalls, 1);
+  watcher.stop();
+}
+
+async function testWatchContinuesAfterRefreshFailure() {
+  const output = new EventEmitter();
+  const signalEmitter = new EventEmitter();
+  const originalError = console.error;
+  const errors = [];
+  let intervalCallback = null;
+  let refreshCount = 0;
+  output.columns = 80;
+  output.rows = 24;
+  output.write = () => {};
+  console.error = (value) => errors.push(String(value));
+
+  try {
+    const watcher = checker.startWatch(
+      { authPath: '/tmp/auth.json', json: false, watch: true },
+      {
+        output,
+        signalEmitter,
+        refreshFunction: async () => {
+          refreshCount += 1;
+          if (refreshCount === 1) {
+            throw new Error('暫時無法查詢');
+          }
+        },
+        setIntervalFunction: (callback) => {
+          intervalCallback = callback;
+          return 1;
+        },
+        clearIntervalFunction: () => {},
+      }
+    );
+
+    await watcher.ready;
+    assert.strictEqual(refreshCount, 1);
+    assert.ok(errors.some((line) => line.includes('暫時無法查詢')));
+
+    intervalCallback();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.strictEqual(refreshCount, 2);
+    watcher.stop();
+  } finally {
+    console.error = originalError;
+  }
+}
+
 async function testRequestsReuseHeadersAndEndpoints() {
   const manualResponse = { available_count: 2, credits: [] };
   const usage = usageResponse();
@@ -419,6 +594,10 @@ const tests = [
   ['只有 primary window 的每週額度可正確辨識', testNormalizeWeeklyOnlyPrimaryWindow],
   ['缺少或 null 欄位不會讓解析失敗', testNormalizeMissingAndNullWindowFields],
   ['使用額度寬度受手動重置額度限制', testUsageLayoutUsesManualResetWidthCap],
+  ['watch CLI 長短選項皆可解析', testWatchCliOptions],
+  ['watch 每分鐘與終端機尺寸變更時刷新', testWatchRefreshesOnIntervalAndTerminalResize],
+  ['watch 刷新不會重疊輸出', testWatchQueuesRefreshWithoutOverlappingOutput],
+  ['watch 單次刷新失敗後仍會繼續', testWatchContinuesAfterRefreshFailure],
   ['兩個端點共用標頭且路徑正確', testRequestsReuseHeadersAndEndpoints],
   ['使用額度 HTTP 錯誤仍保留手動額度並遮罩敏感值', testUsageHttpFailuresKeepManualJsonAndMaskToken],
   ['JSON 同時保留標準化與原始使用額度', testSuccessfulJsonKeepsRawUsageAndAddsNormalizedUsage],
