@@ -187,7 +187,7 @@ codex-reset-checker
 
 ```text
 ╭────────────────────────────────────────────╮
-│             Codex 額度查詢 (v0.4.0)         │
+│             Codex 額度查詢 (v0.4.1)         │
 │ 查詢時間：2026-06-29 14:00:00 +08:00       │
 ╰────────────────────────────────────────────╯
 使用額度
@@ -235,7 +235,7 @@ codex-reset-checker
 
 ```text
 ╭────────────────────────────────────────────╮
-│             Codex 額度查詢 (v0.4.0)         │
+│             Codex 額度查詢 (v0.4.1)         │
 │ 查詢時間：2026-06-29 14:00:00 +08:00       │
 ╰────────────────────────────────────────────╯
 使用額度
@@ -298,16 +298,35 @@ JSON 輸出範例：
 
 ## 10. 發佈到 npm
 
-```bash
-npm login
-npm publish --access public
-```
+### GitHub Actions 自動發佈
+
+專案使用 npm Trusted Publishing 與 GitHub Actions OIDC 發佈，不需要建立或保存 `NPM_TOKEN`。
+
+首次發佈前，在 npm 套件的 Trusted Publisher 設定中填入：
+
+| 欄位 | 設定值 |
+| --- | --- |
+| Organization or user | `doggy8088` |
+| Repository | `codex-reset-checker` |
+| Workflow filename | `publish.yml` |
+| Environment name | 留白 |
+| Allowed actions | `npm publish` |
+
+發佈流程：
+
+1. 將 `package.json` 的版本提升為新版本。
+2. 將變更合併至 `main`，確認 CI 通過。
+3. 在 GitHub 建立同版本 Release，tag 必須為 `v<package.json version>`，例如 `v0.4.1`。
+4. Release 發佈後，`.github/workflows/publish.yml` 會先將 npm 更新至最新版本，然後驗證版本、執行測試，再透過 OIDC 發佈到 npm registry。
+
+CI 會在 `main` 的 push 與所有 pull request 上，使用 Node.js 14、18、20、22 與 24 執行測試及 `npm pack --dry-run`。
 
 建議發佈前確認：
 
 - `name` 為 `@willh/codex-reset-checker`
 - `bin.codex-reset-checker` 指向 `bin/codex-reset-checker.js`
 - `bin/codex-reset-checker.js` 有執行權限（若以直接執行）
+- npm Trusted Publisher 的工作流檔名與 `publish.yml` 完全相同
 
 * * *
 
