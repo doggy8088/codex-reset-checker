@@ -41,3 +41,136 @@ jobs:
 
       - name: Verify package contents
         run: npm pack --dry-run
+
+  release:
+    name: Publish npm package and GitHub Release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    concurrency:
+      group: npm-release
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Update npm
+        run: |
+          npm install --global npm@latest
+          npm --version
+
+      - name: Prepare release metadata and notes
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          PACKAGE_NAME="$(node -p "require('./package.json').name")"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          RELEASE_TAG="v$PACKAGE_VERSION"
+
+          echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
+          echo "package_version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
+          if git rev-parse --verify --quiet "refs/tags/$RELEASE_TAG" >/dev/null; then
+            TAG_COMMIT="$(git rev-list -n 1 "$RELEASE_TAG")"
+            if [ "$TAG_COMMIT" != "$GITHUB_SHA" ]; then
+              echo "Tag $RELEASE_TAG already points to $TAG_COMMIT instead of $GITHUB_SHA." >&2
+              echo "Bump package.json before pushing another commit to main." >&2
+              exit 1
+            fi
+          fi
+
+          RELEASE_STATE="missing"
+          if gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' > release-state.txt 2>/dev/null; then
+            if [ "$(cat release-state.txt)" = "true" ]; then
+              RELEASE_STATE="draft"
+            else
+              RELEASE_STATE="published"
+            fi
+          fi
+          echo "release_state=$RELEASE_STATE" >> "$GITHUB_OUTPUT"
+
+          PREVIOUS_TAG="$(git describe --tags --abbrev=0 "$GITHUB_SHA^" 2>/dev/null || true)"
+          if [ -n "$PREVIOUS_TAG" ]; then
+            COMMIT_RANGE="$PREVIOUS_TAG..$GITHUB_SHA"
+          else
+            COMMIT_RANGE="$GITHUB_SHA"
+          fi
+
+          {
+            echo "## 變更摘要"
+            echo
+            git log "$COMMIT_RANGE" --first-parent --pretty=format:'- %s (`%h`)'
+            echo
+            echo
+            echo "## 發佈資訊"
+            echo
+            echo "- npm 套件：\`$PACKAGE_NAME\`"
+            echo "- 版本：\`$PACKAGE_VERSION\`"
+            if [ -n "$PREVIOUS_TAG" ]; then
+              echo "- Git 範圍：\`$PREVIOUS_TAG..$RELEASE_TAG\`"
+            else
+              echo "- Git 範圍：專案起點至 \`$RELEASE_TAG\`"
+            fi
+          } > release-notes.md
+
+      - name: Create draft GitHub Release
+        if: steps.release.outputs.release_state == 'missing'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.release_tag }}
+        run: |
+          gh release create "$RELEASE_TAG" \
+            --target "$GITHUB_SHA" \
+            --title "$RELEASE_TAG" \
+            --notes-file release-notes.md \
+            --draft
+
+      - name: Install dependencies
+        if: steps.release.outputs.release_state != 'published'
+        run: npm ci
+
+      - name: Run tests
+        if: steps.release.outputs.release_state != 'published'
+        run: npm test
+
+      - name: Check npm package version
+        if: steps.release.outputs.release_state != 'published'
+        id: npm
+        env:
+          PACKAGE_NAME: ${{ steps.release.outputs.package_name }}
+          PACKAGE_VERSION: ${{ steps.release.outputs.package_version }}
+        run: |
+          if npm view "$PACKAGE_NAME@$PACKAGE_VERSION" version >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish package to npm
+        if: steps.release.outputs.release_state != 'published' && steps.npm.outputs.published != 'true'
+        run: npm publish
+
+      - name: Publish GitHub Release
+        if: steps.release.outputs.release_state != 'published'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.release_tag }}
+        run: gh release edit "$RELEASE_TAG" --draft=false --latest
