@@ -60,7 +60,7 @@ function printUsage() {
 選項：
   --auth <path>   指定 auth.json 路徑（未提供則依作業系統自動判斷）
   --json          以單行 JSON 輸出查詢結果與標準化使用額度
-  -w, --watch     持續監看，每分鐘或終端機尺寸變更時自動刷新
+  -w, --watch     持續監看；Spacebar 刷新，q 結束
   -h, --help      顯示說明`);
 }
 
@@ -1074,7 +1074,28 @@ function printCreditCardsInTwoColumns(cards, terminalWidth, cardWidth, gap = CRE
   return true;
 }
 
-function printHeader(contentWidth = null) {
+function getWatchCountdownSeconds(nextRefreshAt, now = Date.now()) {
+  return Math.max(0, Math.ceil((nextRefreshAt - now) / 1000));
+}
+
+function buildQueryTimeContent(nowText, contentWidth, countdownSeconds = null) {
+  const queryTime = `${paint('dim', '查詢時間')}：${paint('cyan', nowText)}`;
+  if (countdownSeconds === null || countdownSeconds === undefined) {
+    return queryTime;
+  }
+
+  const countdown = `${paint('dim', '下次刷新')}：${paint('cyan', `${countdownSeconds} 秒`)}`;
+  const padding = Math.max(1, contentWidth - textDisplayWidth(queryTime) - textDisplayWidth(countdown));
+  return `${queryTime}${' '.repeat(padding)}${countdown}`;
+}
+
+function buildQueryTimeBoxLine(nowText, contentWidth, countdownSeconds) {
+  const content = buildQueryTimeContent(nowText, contentWidth, countdownSeconds);
+  const padding = Math.max(0, contentWidth - textDisplayWidth(content));
+  return `│ ${content}${' '.repeat(padding)} │`;
+}
+
+function printHeader(contentWidth = null, watchOptions = {}) {
   const now = new Date();
   const tzOffsetMinutes = -now.getTimezoneOffset();
   const sign = tzOffsetMinutes >= 0 ? '+' : '-';
@@ -1089,15 +1110,24 @@ function printHeader(contentWidth = null) {
     paint('bold', `Codex 額度查詢 (v${APP_VERSION})`),
     resolvedContentWidth
   );
+  const countdownSeconds = typeof watchOptions.getCountdownSeconds === 'function'
+    ? watchOptions.getCountdownSeconds()
+    : null;
   const lines = buildRoundedBoxLines(
     [
       title,
-      `${paint('dim', '查詢時間')}：${paint('cyan', nowText)}`,
+      buildQueryTimeContent(nowText, resolvedContentWidth, countdownSeconds),
     ],
     resolvedContentWidth
   );
 
   lines.forEach((line) => console.log(line));
+  if (typeof watchOptions.onHeaderRendered === 'function') {
+    watchOptions.onHeaderRendered({
+      contentWidth: Math.max(resolvedContentWidth, textDisplayWidth(lines[1]) - 4),
+      nowText,
+    });
+  }
 }
 
 function printManualResetSection(credits, layout) {
@@ -1214,9 +1244,15 @@ async function runOnce(options) {
     usageError = usageRequest.reason;
   }
 
+  if (typeof options.beforeWatchRender === 'function') {
+    options.beforeWatchRender();
+  }
+
   if (usageError) {
     const message = sanitizeSensitiveText(getErrorMessage(usageError), [accessToken, accountId]);
-    console.error(paint('yellow', `警告：使用額度查詢失敗，仍顯示手動重置額度。${message}`));
+    if (options.json) {
+      console.error(paint('yellow', `警告：使用額度查詢失敗，仍顯示手動重置額度。${message}`));
+    }
   }
 
   if (options.json) {
@@ -1249,20 +1285,36 @@ async function runOnce(options) {
   const usageCards = getUsageCards(usage);
   const usageLayout = getUsageLayout(usageCards, manualResetLayout.totalWidth);
 
-  printHeader(usageLayout.boxContentWidth);
+  printHeader(usageLayout.boxContentWidth, {
+    getCountdownSeconds: options.getWatchCountdownSeconds,
+    onHeaderRendered: options.onWatchHeaderRendered,
+  });
+  if (usageError) {
+    const message = sanitizeSensitiveText(getErrorMessage(usageError), [accessToken, accountId]);
+    console.error(paint('yellow', `警告：使用額度查詢失敗，仍顯示手動重置額度。${message}`));
+  }
   printUsageSection(usage, usageLayout);
   console.log('');
   printManualResetSection(credits, manualResetLayout);
+  if (options.watch) {
+    console.log('');
+    console.log(paint('dim', '按下 Spacebar 立即刷新，按下 q 結束監視。'));
+  }
 }
 
 function startWatch(options, dependencies = {}) {
   const output = dependencies.output || process.stdout;
+  const input = dependencies.input || process.stdin;
   const signalEmitter = dependencies.signalEmitter || process;
-  const refreshFunction = dependencies.refreshFunction || (() => runOnce(options));
+  const refreshFunction = dependencies.refreshFunction || ((watchOptions) => runOnce({
+    ...options,
+    ...watchOptions,
+  }));
   const setIntervalFunction = dependencies.setIntervalFunction || setInterval;
   const clearIntervalFunction = dependencies.clearIntervalFunction || clearInterval;
   const setTimeoutFunction = dependencies.setTimeoutFunction || setTimeout;
   const clearTimeoutFunction = dependencies.clearTimeoutFunction || clearTimeout;
+  const nowFunction = dependencies.nowFunction || Date.now;
   const intervalMs = dependencies.intervalMs || WATCH_INTERVAL_MS;
   const resizeDebounceMs = dependencies.resizeDebounceMs === undefined
     ? RESIZE_DEBOUNCE_MS
@@ -1273,6 +1325,28 @@ function startWatch(options, dependencies = {}) {
   let activeRefresh = null;
   let refreshPending = false;
   let stopped = false;
+  let nextRefreshAt = nowFunction() + intervalMs;
+  let headerState = null;
+  let countdownIntervalHandle = null;
+  let inputWasRaw = false;
+  let inputWasFlowing = false;
+  let rawModeChanged = false;
+  let inputFlowingChanged = false;
+
+  const getCountdownSeconds = () => getWatchCountdownSeconds(nextRefreshAt, nowFunction());
+
+  const renderCountdown = () => {
+    if (stopped || activeRefresh || !headerState || !output || typeof output.write !== 'function') {
+      return;
+    }
+
+    const line = buildQueryTimeBoxLine(
+      headerState.nowText,
+      headerState.contentWidth,
+      getCountdownSeconds()
+    );
+    output.write(`\x1b7\x1b[3;1H\x1b[2K${line}\x1b8`);
+  };
 
   const refresh = () => {
     if (stopped) {
@@ -1287,11 +1361,25 @@ function startWatch(options, dependencies = {}) {
     activeRefresh = (async () => {
       do {
         refreshPending = false;
-        clearTerminal(output);
+        headerState = null;
+        let screenPrepared = false;
+        const prepareScreen = () => {
+          if (!screenPrepared) {
+            clearTerminal(output);
+            screenPrepared = true;
+          }
+        };
 
         try {
-          await refreshFunction();
+          await refreshFunction({
+            beforeWatchRender: prepareScreen,
+            getWatchCountdownSeconds: getCountdownSeconds,
+            onWatchHeaderRendered: (state) => {
+              headerState = state;
+            },
+          });
         } catch (error) {
+          prepareScreen();
           console.error(paint('red', `錯誤：刷新失敗：${getErrorMessage(error)}`));
         }
       } while (refreshPending && !stopped);
@@ -1309,14 +1397,29 @@ function startWatch(options, dependencies = {}) {
     }
 
     previousSize = currentSize;
+    headerState = null;
     if (resizeTimeoutHandle !== null) {
       clearTimeoutFunction(resizeTimeoutHandle);
     }
-
     resizeTimeoutHandle = setTimeoutFunction(() => {
       resizeTimeoutHandle = null;
       void refresh();
     }, resizeDebounceMs);
+  };
+
+  const startAutoRefreshTimer = () => {
+    intervalHandle = setIntervalFunction(() => {
+      nextRefreshAt = nowFunction() + intervalMs;
+      void refresh();
+    }, intervalMs);
+  };
+
+  const resetAutoRefreshTimer = () => {
+    nextRefreshAt = nowFunction() + intervalMs;
+    if (intervalHandle !== null) {
+      clearIntervalFunction(intervalHandle);
+    }
+    startAutoRefreshTimer();
   };
 
   const stop = () => {
@@ -1328,6 +1431,9 @@ function startWatch(options, dependencies = {}) {
     if (intervalHandle !== null) {
       clearIntervalFunction(intervalHandle);
     }
+    if (countdownIntervalHandle !== null) {
+      clearIntervalFunction(countdownIntervalHandle);
+    }
     if (resizeTimeoutHandle !== null) {
       clearTimeoutFunction(resizeTimeoutHandle);
     }
@@ -1338,12 +1444,34 @@ function startWatch(options, dependencies = {}) {
       signalEmitter.removeListener('SIGINT', handleSignal);
       signalEmitter.removeListener('SIGTERM', handleSignal);
     }
+    if (input && typeof input.removeListener === 'function') {
+      input.removeListener('data', handleInput);
+    }
+    if (rawModeChanged && input && typeof input.setRawMode === 'function') {
+      input.setRawMode(inputWasRaw);
+    }
+    if (inputFlowingChanged && input && typeof input.pause === 'function') {
+      input.pause();
+    }
   };
 
   const handleSignal = () => {
     stop();
     if (output && typeof output.write === 'function') {
       output.write('\n');
+    }
+  };
+
+  const handleInput = (chunk) => {
+    const value = String(chunk);
+    if (value.includes('\u0003') || value.includes('q')) {
+      handleSignal();
+      return;
+    }
+
+    if (value.includes(' ')) {
+      resetAutoRefreshTimer();
+      void refresh();
     }
   };
 
@@ -1354,10 +1482,24 @@ function startWatch(options, dependencies = {}) {
     signalEmitter.once('SIGINT', handleSignal);
     signalEmitter.once('SIGTERM', handleSignal);
   }
+  if (input && input.isTTY && typeof input.on === 'function') {
+    inputWasRaw = Boolean(input.isRaw);
+    inputWasFlowing = input.readableFlowing === true;
+    if (typeof input.setRawMode === 'function' && !inputWasRaw) {
+      input.setRawMode(true);
+      rawModeChanged = true;
+    }
+    input.on('data', handleInput);
+    if (!inputWasFlowing && typeof input.resume === 'function') {
+      input.resume();
+      inputFlowingChanged = true;
+    }
+  }
 
-  intervalHandle = setIntervalFunction(() => {
-    void refresh();
-  }, intervalMs);
+  startAutoRefreshTimer();
+  if (!options.json && output && output.isTTY) {
+    countdownIntervalHandle = setIntervalFunction(renderCountdown, 1_000);
+  }
 
   return {
     ready: refresh(),
@@ -1390,6 +1532,7 @@ module.exports = {
   formatCompactDurationFromSeconds,
   formatUsageReset,
   getCliOptions,
+  getWatchCountdownSeconds,
   getCurrentTerminalWidth,
   getManualResetLayout,
   getTerminalSize,

@@ -294,7 +294,9 @@ async function testWatchRefreshesOnIntervalAndTerminalResize() {
     {
       output,
       signalEmitter,
-      refreshFunction: async () => {
+      refreshFunction: async (watchOptions) => {
+        refreshEvents.push('query');
+        watchOptions.beforeWatchRender();
         refreshEvents.push('refresh');
       },
       setIntervalFunction: (callback, delay) => {
@@ -311,14 +313,14 @@ async function testWatchRefreshesOnIntervalAndTerminalResize() {
   );
 
   await watcher.ready;
-  assert.deepStrictEqual(refreshEvents, ['clear', 'refresh']);
+  assert.deepStrictEqual(refreshEvents, ['query', 'clear', 'refresh']);
   assert.strictEqual(writes[0], '\x1b[2J\x1b[H');
   assert.strictEqual(intervals.length, 1);
   assert.strictEqual(intervals[0].delay, 60_000);
 
   intervals[0].callback();
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepStrictEqual(refreshEvents.slice(-2), ['clear', 'refresh']);
+  assert.deepStrictEqual(refreshEvents.slice(-3), ['query', 'clear', 'refresh']);
 
   output.emit('resize');
   assert.strictEqual(timeouts.length, 0, '尺寸未變時不應刷新');
@@ -329,7 +331,7 @@ async function testWatchRefreshesOnIntervalAndTerminalResize() {
   assert.strictEqual(timeouts[0].delay, 100);
   timeouts[0].callback();
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepStrictEqual(refreshEvents.slice(-2), ['clear', 'refresh']);
+  assert.deepStrictEqual(refreshEvents.slice(-3), ['query', 'clear', 'refresh']);
 
   output.rows = 32;
   output.emit('resize');
@@ -429,6 +431,124 @@ async function testWatchContinuesAfterRefreshFailure() {
     watcher.stop();
   } finally {
     console.error = originalError;
+  }
+}
+
+async function testWatchCountdownAndSpacebarRefresh() {
+  const output = new EventEmitter();
+  const input = new EventEmitter();
+  const signalEmitter = new EventEmitter();
+  const writes = [];
+  const intervals = [];
+  const clearedIntervals = [];
+  const rawModeChanges = [];
+  let refreshCount = 0;
+  let currentTime = 1_000_000;
+  let latestWatchOptions = null;
+  let paused = true;
+  output.columns = 80;
+  output.rows = 24;
+  output.isTTY = true;
+  output.write = (value) => writes.push(String(value));
+  input.isTTY = true;
+  input.isRaw = false;
+  input.readableFlowing = null;
+  input.isPaused = () => paused;
+  input.setRawMode = (value) => {
+    input.isRaw = value;
+    rawModeChanges.push(value);
+  };
+  input.resume = () => {
+    paused = false;
+    input.readableFlowing = true;
+  };
+  input.pause = () => {
+    paused = true;
+    input.readableFlowing = false;
+  };
+
+  const watcher = checker.startWatch(
+    { authPath: '/tmp/auth.json', json: false, watch: true },
+    {
+      output,
+      input,
+      signalEmitter,
+      refreshFunction: async (watchOptions) => {
+        refreshCount += 1;
+        latestWatchOptions = watchOptions;
+        watchOptions.beforeWatchRender();
+        watchOptions.onWatchHeaderRendered({
+          contentWidth: 54,
+          nowText: '2026-07-13 17:12:35 +08:00',
+        });
+      },
+      setIntervalFunction: (callback, delay) => {
+        const handle = { callback, delay };
+        intervals.push(handle);
+        return handle;
+      },
+      clearIntervalFunction: (handle) => clearedIntervals.push(handle),
+      nowFunction: () => currentTime,
+    }
+  );
+
+  await watcher.ready;
+  assert.strictEqual(refreshCount, 1);
+  assert.strictEqual(latestWatchOptions.getWatchCountdownSeconds(), 60);
+  assert.deepStrictEqual(rawModeChanges, [true]);
+  assert.strictEqual(intervals.length, 2);
+
+  const countdownTimer = intervals.find((item) => item.delay === 1_000);
+  assert.ok(countdownTimer);
+  countdownTimer.callback();
+  const countdownWrite = writes[writes.length - 1];
+  assert.ok(countdownWrite.includes('\x1b[3;1H'));
+  assert.ok(countdownWrite.includes('下次刷新'));
+  assert.ok(countdownWrite.includes('秒'));
+  assert.ok(countdownWrite.includes('│\x1b8'), '倒數內容應靠右對齊至框線');
+
+  currentTime += 30_000;
+  assert.strictEqual(latestWatchOptions.getWatchCountdownSeconds(), 30);
+  const originalAutoRefreshTimer = intervals.find((item) => item.delay === 60_000);
+  input.emit('data', Buffer.from(' '));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.strictEqual(refreshCount, 2);
+  assert.strictEqual(latestWatchOptions.getWatchCountdownSeconds(), 60);
+  assert.strictEqual(intervals.filter((item) => item.delay === 60_000).length, 2);
+  assert.ok(clearedIntervals.includes(originalAutoRefreshTimer));
+
+  input.emit('data', Buffer.from('q'));
+  assert.deepStrictEqual(rawModeChanges, [true, false]);
+  assert.strictEqual(input.listenerCount('data'), 0);
+  assert.strictEqual(paused, true);
+  assert.strictEqual(clearedIntervals.length, 3);
+}
+
+async function testWatchHumanOutputEndsWithControls() {
+  const auth = createAuthFile();
+  const originalLog = console.log;
+  const output = [];
+  console.log = (value = '') => output.push(String(value));
+
+  try {
+    await withFakeHttps(
+      {
+        '/backend-api/wham/rate-limit-reset-credits': {
+          body: { available_count: 2, credits: [] },
+        },
+        '/backend-api/wham/usage': { body: usageResponse() },
+      },
+      async () => checker.runOnce({
+        authPath: auth.authPath,
+        json: false,
+        watch: true,
+      })
+    );
+
+    assert.strictEqual(output[output.length - 1], '按下 Spacebar 立即刷新，按下 q 結束監視。');
+  } finally {
+    console.log = originalLog;
+    auth.cleanup();
   }
 }
 
@@ -598,6 +718,8 @@ const tests = [
   ['watch 每分鐘與終端機尺寸變更時刷新', testWatchRefreshesOnIntervalAndTerminalResize],
   ['watch 刷新不會重疊輸出', testWatchQueuesRefreshWithoutOverlappingOutput],
   ['watch 單次刷新失敗後仍會繼續', testWatchContinuesAfterRefreshFailure],
+  ['watch 顯示倒數、Spacebar 無空白等待刷新並可以 q 結束', testWatchCountdownAndSpacebarRefresh],
+  ['watch 輸出最後一行顯示操作提示', testWatchHumanOutputEndsWithControls],
   ['兩個端點共用標頭且路徑正確', testRequestsReuseHeadersAndEndpoints],
   ['使用額度 HTTP 錯誤仍保留手動額度並遮罩敏感值', testUsageHttpFailuresKeepManualJsonAndMaskToken],
   ['JSON 同時保留標準化與原始使用額度', testSuccessfulJsonKeepsRawUsageAndAddsNormalizedUsage],
