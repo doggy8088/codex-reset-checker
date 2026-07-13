@@ -336,8 +336,11 @@ function formatResponseBody(body, sensitiveValues) {
   return ` 回應內容：${shortened}`;
 }
 
-function requestJson(apiUrl, accessToken, accountId) {
-  const headers = buildApiHeaders(accessToken, accountId);
+function requestJson(apiUrl, accessToken, accountId, additionalHeaders = {}) {
+  const headers = {
+    ...buildApiHeaders(accessToken, accountId),
+    ...additionalHeaders,
+  };
   const sensitiveValues = [accessToken, accountId];
   const endpoint = new URL(apiUrl);
 
@@ -1078,21 +1081,98 @@ function getWatchCountdownSeconds(nextRefreshAt, now = Date.now()) {
   return Math.max(0, Math.ceil((nextRefreshAt - now) / 1000));
 }
 
-function buildQueryTimeContent(nowText, contentWidth, countdownSeconds = null) {
+function formatPlanName(planType) {
+  if (typeof planType !== 'string' || !planType.trim()) {
+    return 'N/A';
+  }
+
+  const normalized = planType.trim().toLowerCase();
+  const knownPlans = {
+    free: 'Free',
+    plus: 'Plus',
+    pro: 'Pro 20x',
+    prolite: 'Pro 5x',
+    team: 'Team',
+    business: 'Business',
+    enterprise: 'Enterprise',
+    edu: 'Edu',
+  };
+
+  return knownPlans[normalized] || normalized
+    .split(/[-_]+/)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function formatRenewalTime(expiresAt) {
+  if (expiresAt === null || expiresAt === undefined || expiresAt === '') {
+    return 'N/A';
+  }
+
+  const numericValue = Number(expiresAt);
+  const date = Number.isFinite(numericValue)
+    ? new Date(numericValue > 1_000_000_000_000 ? numericValue : numericValue * 1000)
+    : new Date(expiresAt);
+  if (Number.isNaN(date.getTime())) {
+    return 'N/A';
+  }
+
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
+    date.getHours()
+  )}:${pad(date.getMinutes())}`;
+}
+
+function getSubscriptionExpiresAt(accountStatus, accountId) {
+  if (!isObject(accountStatus)) {
+    return null;
+  }
+
+  if (isObject(accountStatus.account_plan)) {
+    return accountStatus.account_plan.subscription_expires_at_timestamp ?? null;
+  }
+
+  if (!isObject(accountStatus.accounts)) {
+    return null;
+  }
+
+  const accountEntries = Object.values(accountStatus.accounts).filter(isObject);
+  const matchingAccount = accountEntries.find((entry) =>
+    isObject(entry.account) && entry.account.account_id === accountId
+  );
+  const defaultAccount = isObject(accountStatus.accounts.default)
+    ? accountStatus.accounts.default
+    : null;
+  const selectedAccount = matchingAccount || defaultAccount || accountEntries[0];
+
+  return isObject(selectedAccount) && isObject(selectedAccount.entitlement)
+    ? selectedAccount.entitlement.expires_at ?? null
+    : null;
+}
+
+function buildHeaderDetailLines(nowText, contentWidth, accountInfo = {}) {
   const queryTime = `${paint('dim', '查詢時間')}：${paint('cyan', nowText)}`;
+  const plan = `${paint('dim', '方案')}：${paint('cyan', formatPlanName(accountInfo.planType))}`;
+  const renewal = `${paint('dim', '續約時間')}：${paint('cyan', formatRenewalTime(accountInfo.renewalAt))}`;
+  const accountSummary = `${plan}  ${renewal}`;
+  const inlinePadding = contentWidth - textDisplayWidth(queryTime) - textDisplayWidth(accountSummary);
+
+  if (inlinePadding >= 1) {
+    return [`${queryTime}${' '.repeat(inlinePadding)}${accountSummary}`];
+  }
+
+  const summaryPadding = Math.max(0, contentWidth - textDisplayWidth(accountSummary));
+  return [queryTime, `${' '.repeat(summaryPadding)}${accountSummary}`];
+}
+
+function buildWatchControlsLine(countdownSeconds, lineWidth) {
+  const controls = paint('dim', 'Spacebar 立即刷新，q 結束監視。');
   if (countdownSeconds === null || countdownSeconds === undefined) {
-    return queryTime;
+    return controls;
   }
 
   const countdown = `${paint('dim', '下次刷新')}：${paint('cyan', `${countdownSeconds} 秒`)}`;
-  const padding = Math.max(1, contentWidth - textDisplayWidth(queryTime) - textDisplayWidth(countdown));
-  return `${queryTime}${' '.repeat(padding)}${countdown}`;
-}
-
-function buildQueryTimeBoxLine(nowText, contentWidth, countdownSeconds) {
-  const content = buildQueryTimeContent(nowText, contentWidth, countdownSeconds);
-  const padding = Math.max(0, contentWidth - textDisplayWidth(content));
-  return `│ ${content}${' '.repeat(padding)} │`;
+  const padding = Math.max(2, lineWidth - textDisplayWidth(controls) - textDisplayWidth(countdown));
+  return `${controls}${' '.repeat(padding)}${countdown}`;
 }
 
 function printHeader(contentWidth = null, watchOptions = {}) {
@@ -1110,24 +1190,20 @@ function printHeader(contentWidth = null, watchOptions = {}) {
     paint('bold', `Codex 額度查詢 (v${APP_VERSION})`),
     resolvedContentWidth
   );
-  const countdownSeconds = typeof watchOptions.getCountdownSeconds === 'function'
-    ? watchOptions.getCountdownSeconds()
-    : null;
+  const detailLines = buildHeaderDetailLines(nowText, resolvedContentWidth, watchOptions);
+  const headerContentWidth = Math.max(
+    resolvedContentWidth,
+    ...detailLines.map((line) => textDisplayWidth(line))
+  );
   const lines = buildRoundedBoxLines(
     [
-      title,
-      buildQueryTimeContent(nowText, resolvedContentWidth, countdownSeconds),
+      centerText(paint('bold', `Codex 額度查詢 (v${APP_VERSION})`), headerContentWidth),
+      ...detailLines,
     ],
-    resolvedContentWidth
+    headerContentWidth
   );
 
   lines.forEach((line) => console.log(line));
-  if (typeof watchOptions.onHeaderRendered === 'function') {
-    watchOptions.onHeaderRendered({
-      contentWidth: Math.max(resolvedContentWidth, textDisplayWidth(lines[1]) - 4),
-      nowText,
-    });
-  }
 }
 
 function printManualResetSection(credits, layout) {
@@ -1211,9 +1287,21 @@ async function runOnce(options) {
     throw new Error('auth.json 內未找到 tokens.access_token');
   }
 
-  const [rateLimitRequest, usageRequest] = await Promise.allSettled([
+  const [rateLimitRequest, usageRequest, accountRequest] = await Promise.allSettled([
     requestRateLimit(accessToken, accountId),
     requestUsage(accessToken, accountId),
+    requestJson(
+      'https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27',
+      accessToken,
+      accountId,
+      {
+        Accept: 'application/json',
+        Origin: 'https://chatgpt.com',
+        Referer: 'https://chatgpt.com/',
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/138.0.0.0 Safari/537.36',
+      }
+    ),
   ]);
 
   if (rateLimitRequest.status === 'rejected') {
@@ -1243,6 +1331,7 @@ async function runOnce(options) {
   } else {
     usageError = usageRequest.reason;
   }
+  const accountStatus = accountRequest.status === 'fulfilled' ? accountRequest.value : null;
 
   if (typeof options.beforeWatchRender === 'function') {
     options.beforeWatchRender();
@@ -1286,8 +1375,8 @@ async function runOnce(options) {
   const usageLayout = getUsageLayout(usageCards, manualResetLayout.totalWidth);
 
   printHeader(usageLayout.boxContentWidth, {
-    getCountdownSeconds: options.getWatchCountdownSeconds,
-    onHeaderRendered: options.onWatchHeaderRendered,
+    planType: usageRaw && typeof usageRaw === 'object' ? usageRaw.plan_type : null,
+    renewalAt: getSubscriptionExpiresAt(accountStatus, accountId),
   });
   if (usageError) {
     const message = sanitizeSensitiveText(getErrorMessage(usageError), [accessToken, accountId]);
@@ -1298,7 +1387,17 @@ async function runOnce(options) {
   printManualResetSection(credits, manualResetLayout);
   if (options.watch) {
     console.log('');
-    console.log(paint('dim', '按下 Spacebar 立即刷新，按下 q 結束監視。'));
+    const countdownSeconds = typeof options.getWatchCountdownSeconds === 'function'
+      ? options.getWatchCountdownSeconds()
+      : null;
+    const lineWidth = usageLayout.boxContentWidth + 4;
+    const controlsLine = buildWatchControlsLine(countdownSeconds, lineWidth);
+    console.log(controlsLine);
+    if (typeof options.onWatchFooterRendered === 'function') {
+      options.onWatchFooterRendered({
+        lineWidth: Math.max(lineWidth, textDisplayWidth(controlsLine)),
+      });
+    }
   }
 }
 
@@ -1326,7 +1425,7 @@ function startWatch(options, dependencies = {}) {
   let refreshPending = false;
   let stopped = false;
   let nextRefreshAt = nowFunction() + intervalMs;
-  let headerState = null;
+  let footerState = null;
   let countdownIntervalHandle = null;
   let inputWasRaw = false;
   let inputWasFlowing = false;
@@ -1336,16 +1435,12 @@ function startWatch(options, dependencies = {}) {
   const getCountdownSeconds = () => getWatchCountdownSeconds(nextRefreshAt, nowFunction());
 
   const renderCountdown = () => {
-    if (stopped || activeRefresh || !headerState || !output || typeof output.write !== 'function') {
+    if (stopped || activeRefresh || !footerState || !output || typeof output.write !== 'function') {
       return;
     }
 
-    const line = buildQueryTimeBoxLine(
-      headerState.nowText,
-      headerState.contentWidth,
-      getCountdownSeconds()
-    );
-    output.write(`\x1b7\x1b[3;1H\x1b[2K${line}\x1b8`);
+    const line = buildWatchControlsLine(getCountdownSeconds(), footerState.lineWidth);
+    output.write(`\x1b7\x1b[1A\x1b[2K${line}\x1b8`);
   };
 
   const refresh = () => {
@@ -1374,8 +1469,8 @@ function startWatch(options, dependencies = {}) {
           await refreshFunction({
             beforeWatchRender: prepareScreen,
             getWatchCountdownSeconds: getCountdownSeconds,
-            onWatchHeaderRendered: (state) => {
-              headerState = state;
+            onWatchFooterRendered: (state) => {
+              footerState = state;
             },
           });
         } catch (error) {

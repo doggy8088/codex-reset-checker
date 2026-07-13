@@ -477,9 +477,8 @@ async function testWatchCountdownAndSpacebarRefresh() {
         refreshCount += 1;
         latestWatchOptions = watchOptions;
         watchOptions.beforeWatchRender();
-        watchOptions.onWatchHeaderRendered({
-          contentWidth: 54,
-          nowText: '2026-07-13 17:12:35 +08:00',
+        watchOptions.onWatchFooterRendered({
+          lineWidth: 58,
         });
       },
       setIntervalFunction: (callback, delay) => {
@@ -502,10 +501,11 @@ async function testWatchCountdownAndSpacebarRefresh() {
   assert.ok(countdownTimer);
   countdownTimer.callback();
   const countdownWrite = writes[writes.length - 1];
-  assert.ok(countdownWrite.includes('\x1b[3;1H'));
+  assert.ok(countdownWrite.includes('\x1b[1A'));
+  assert.ok(countdownWrite.includes('Spacebar'));
   assert.ok(countdownWrite.includes('下次刷新'));
   assert.ok(countdownWrite.includes('秒'));
-  assert.ok(countdownWrite.includes('│\x1b8'), '倒數內容應靠右對齊至框線');
+  assert.ok(countdownWrite.endsWith('\x1b8'), '倒數內容應顯示於最下方操作提示列');
 
   currentTime += 30_000;
   assert.strictEqual(latestWatchOptions.getWatchCountdownSeconds(), 30);
@@ -537,15 +537,29 @@ async function testWatchHumanOutputEndsWithControls() {
           body: { available_count: 2, credits: [] },
         },
         '/backend-api/wham/usage': { body: usageResponse() },
+        '/backend-api/accounts/check/v4-2023-04-27': {
+          body: {
+            accounts: {
+              default: {
+                account: { account_id: 'account-id' },
+                entitlement: { expires_at: '2026-08-15T00:00:00' },
+              },
+            },
+          },
+        },
       },
       async () => checker.runOnce({
         authPath: auth.authPath,
         json: false,
         watch: true,
+        getWatchCountdownSeconds: () => 60,
       })
     );
 
-    assert.strictEqual(output[output.length - 1], '按下 Spacebar 立即刷新，按下 q 結束監視。');
+    assert.ok(output.some((line) => line.includes('方案：Pro')));
+    assert.ok(output.some((line) => line.includes('續約時間：2026-08-15 00:00')));
+    assert.ok(output[output.length - 1].includes('Spacebar 立即刷新，q 結束監視。'));
+    assert.ok(output[output.length - 1].includes('下次刷新：60 秒'));
   } finally {
     console.log = originalLog;
     auth.cleanup();
