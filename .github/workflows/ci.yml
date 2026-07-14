@@ -42,10 +42,51 @@ jobs:
       - name: Verify package contents
         run: npm pack --dry-run
 
+  release_check:
+    name: Check package version change
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.version.outputs.changed }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Compare package versions
+        id: version
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          CURRENT_VERSION="$(node -p "require('./package.json').version")"
+          PREVIOUS_VERSION=""
+
+          if git cat-file -e "$BEFORE_SHA:package.json" 2>/dev/null; then
+            PREVIOUS_VERSION="$(
+              git show "$BEFORE_SHA:package.json" |
+                node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).version'
+            )"
+          fi
+
+          if [ "$CURRENT_VERSION" != "$PREVIOUS_VERSION" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "Previous package version: ${PREVIOUS_VERSION:-not found}"
+          echo "Current package version: $CURRENT_VERSION"
+
   release:
     name: Publish npm package and GitHub Release
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: test
+    if: needs.release_check.outputs.should_release == 'true'
+    needs:
+      - test
+      - release_check
     runs-on: ubuntu-latest
     concurrency:
       group: npm-release
