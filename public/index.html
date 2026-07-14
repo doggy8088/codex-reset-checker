@@ -1,0 +1,1359 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Codex Reset Checker 是一套唯讀、零依賴的跨平台 CLI 工具，快速查詢 Codex 使用額度、重置倒數與手動重置額度。">
+  <meta name="keywords" content="Codex, ChatGPT, CLI, 使用額度, rate limit, reset credits, 開發者工具">
+  <meta name="author" content="Will 保哥">
+  <meta name="application-name" content="Codex Reset Checker">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+  <link rel="canonical" href="https://lemon-ground-0f66b9800.7.azurestaticapps.net/">
+  <link rel="alternate" hreflang="zh-Hant" href="https://lemon-ground-0f66b9800.7.azurestaticapps.net/">
+  <link rel="alternate" hreflang="x-default" href="https://lemon-ground-0f66b9800.7.azurestaticapps.net/">
+  <meta name="theme-color" content="#090b0d">
+
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="zh_TW">
+  <meta property="og:site_name" content="Codex Reset Checker">
+  <meta property="og:title" content="Codex Reset Checker — 額度，不用猜。">
+  <meta property="og:description" content="一行指令，快速掌握 Codex 使用額度、重置倒數與手動重置額度。唯讀、零依賴、不洩漏憑證。">
+  <meta property="og:url" content="https://lemon-ground-0f66b9800.7.azurestaticapps.net/">
+  <meta property="og:image" content="https://lemon-ground-0f66b9800.7.azurestaticapps.net/og-image.jpg">
+  <meta property="og:image:secure_url" content="https://lemon-ground-0f66b9800.7.azurestaticapps.net/og-image.jpg">
+  <meta property="og:image:type" content="image/jpeg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Codex Reset Checker 深色產品頁，顯示額度不用猜的標題與終端機額度查詢畫面">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Codex Reset Checker — 額度，不用猜。">
+  <meta name="twitter:description" content="一行指令，快速掌握 Codex 使用額度與重置時間。唯讀、零依賴、不洩漏憑證。">
+  <meta name="twitter:image" content="https://lemon-ground-0f66b9800.7.azurestaticapps.net/og-image.jpg">
+  <meta name="twitter:image:alt" content="Codex Reset Checker 產品頁與終端機額度查詢畫面">
+
+  <title>Codex Reset Checker — 額度，不用猜。</title>
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "WebSite",
+          "@id": "https://lemon-ground-0f66b9800.7.azurestaticapps.net/#website",
+          "url": "https://lemon-ground-0f66b9800.7.azurestaticapps.net/",
+          "name": "Codex Reset Checker",
+          "description": "快速查詢 Codex 使用額度、重置倒數與手動重置額度的跨平台 CLI 工具。",
+          "inLanguage": "zh-Hant"
+        },
+        {
+          "@type": "SoftwareApplication",
+          "@id": "https://lemon-ground-0f66b9800.7.azurestaticapps.net/#software",
+          "name": "Codex Reset Checker",
+          "alternateName": "@willh/codex-reset-checker",
+          "url": "https://lemon-ground-0f66b9800.7.azurestaticapps.net/",
+          "image": "https://lemon-ground-0f66b9800.7.azurestaticapps.net/og-image.jpg",
+          "description": "唯讀、零依賴的 CLI 工具，用來查詢 Codex 使用額度、模型專用額度、重置倒數與手動重置額度。",
+          "applicationCategory": "DeveloperApplication",
+          "applicationSubCategory": "Command-line utility",
+          "operatingSystem": "macOS, Linux, Windows",
+          "softwareVersion": "0.6.1",
+          "downloadUrl": "https://www.npmjs.com/package/@willh/codex-reset-checker",
+          "codeRepository": "https://github.com/doggy8088/codex-reset-checker",
+          "license": "https://opensource.org/license/mit",
+          "inLanguage": "zh-Hant",
+          "isAccessibleForFree": true,
+          "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD"
+          },
+          "author": {
+            "@type": "Person",
+            "name": "Will 保哥",
+            "url": "https://github.com/doggy8088"
+          },
+          "featureList": [
+            "查詢 Codex 使用額度與重置時間",
+            "顯示模型專用額度",
+            "顯示手動重置額度與到期時間",
+            "支援 JSON 輸出與持續監看",
+            "不修改 auth.json 且不輸出敏感憑證"
+          ]
+        }
+      ]
+    }
+  </script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: oklch(0.09 0 0);
+      --surface: oklch(0.14 0.008 220);
+      --surface-high: oklch(0.19 0.012 220);
+      --ink: oklch(0.94 0.008 220);
+      --muted: oklch(0.69 0.018 220);
+      --line: oklch(0.34 0.018 220);
+      --line-strong: oklch(0.5 0.03 220);
+      --cyan: oklch(0.72 0.13 220);
+      --cyan-bright: oklch(0.82 0.12 220);
+      --green: oklch(0.78 0.2 140);
+      --green-dark: oklch(0.35 0.11 140);
+      --amber: oklch(0.8 0.15 78);
+      --danger: oklch(0.68 0.19 25);
+      --display: "Aptos Narrow", "Arial Narrow", "Roboto Condensed", sans-serif;
+      --body: "Aptos", "Segoe UI", system-ui, sans-serif;
+      --mono: "SFMono-Regular", "Cascadia Code", "Roboto Mono", Consolas, monospace;
+      --space-1: 0.25rem;
+      --space-2: 0.5rem;
+      --space-3: 0.75rem;
+      --space-4: 1rem;
+      --space-5: 1.25rem;
+      --space-6: 1.5rem;
+      --space-8: 2rem;
+      --space-12: 3rem;
+      --space-16: 4rem;
+      --space-24: 6rem;
+      --radius-sm: 0.375rem;
+      --radius-md: 0.75rem;
+      --radius-lg: 1.25rem;
+      --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+      --container: 78rem;
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      background: var(--bg);
+    }
+
+    body {
+      min-width: 20rem;
+      margin: 0;
+      background:
+        linear-gradient(var(--line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--line) 1px, transparent 1px),
+        var(--bg);
+      background-size: 4rem 4rem;
+      color: var(--ink);
+      font-family: var(--body);
+      font-size: 1rem;
+      font-weight: 400;
+      line-height: 1.65;
+      letter-spacing: 0.012em;
+      font-kerning: normal;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body::before {
+      position: fixed;
+      z-index: -1;
+      inset: 0;
+      background: linear-gradient(180deg, var(--bg) 0%, transparent 30%, var(--bg) 100%);
+      content: "";
+      pointer-events: none;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    button,
+    a {
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    button {
+      font: inherit;
+    }
+
+    img {
+      display: block;
+      max-width: 100%;
+    }
+
+    code {
+      font-family: var(--mono);
+      font-variant-ligatures: none;
+    }
+
+    :focus-visible {
+      outline: 3px solid var(--cyan-bright);
+      outline-offset: 4px;
+    }
+
+    .skip-link {
+      position: fixed;
+      z-index: 20;
+      top: var(--space-4);
+      left: var(--space-4);
+      padding: var(--space-3) var(--space-4);
+      border-radius: var(--radius-sm);
+      background: var(--cyan);
+      color: var(--bg);
+      font-weight: 700;
+      transform: translateY(-180%);
+      transition: transform 180ms var(--ease-out);
+    }
+
+    .skip-link:focus {
+      transform: translateY(0);
+    }
+
+    .container {
+      width: min(calc(100% - 2.5rem), var(--container));
+      margin-inline: auto;
+    }
+
+    .site-header {
+      position: relative;
+      z-index: 10;
+      border-bottom: 1px solid var(--line);
+      background: var(--bg);
+    }
+
+    .nav {
+      display: flex;
+      min-height: 4.75rem;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-4);
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--space-3);
+      color: var(--ink);
+      font-family: var(--display);
+      font-size: 1rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-decoration: none;
+      text-transform: uppercase;
+    }
+
+    .brand-mark {
+      display: grid;
+      width: 2rem;
+      height: 2rem;
+      border: 1px solid var(--cyan);
+      place-items: center;
+      color: var(--cyan-bright);
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      box-shadow: inset 0 0 0 3px var(--bg);
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+    }
+
+    .nav-link {
+      display: inline-flex;
+      min-height: 2.75rem;
+      align-items: center;
+      padding-inline: var(--space-4);
+      color: var(--muted);
+      font-size: 0.9rem;
+      font-weight: 650;
+      text-decoration: none;
+      transition: color 180ms var(--ease-out), background-color 180ms var(--ease-out);
+    }
+
+    .nav-link:hover {
+      color: var(--ink);
+      background: var(--surface);
+    }
+
+    .hero {
+      position: relative;
+      overflow: clip;
+      padding-block: clamp(3.5rem, 7vw, 6rem) clamp(4rem, 7vw, 6rem);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .hero::after {
+      position: absolute;
+      top: 12%;
+      right: -9rem;
+      width: 28rem;
+      height: 28rem;
+      border: 1px solid var(--green-dark);
+      border-radius: 50%;
+      box-shadow:
+        0 0 0 4rem var(--bg),
+        0 0 0 calc(4rem + 1px) var(--line);
+      content: "";
+      opacity: 0.7;
+      pointer-events: none;
+    }
+
+    .hero-grid {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      align-items: center;
+      gap: clamp(3rem, 5vw, 5rem);
+    }
+
+    .hero-copy {
+      max-width: 42rem;
+    }
+
+    .signal {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--space-3);
+      margin-bottom: var(--space-6);
+      color: var(--cyan-bright);
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      font-weight: 650;
+      letter-spacing: 0.07em;
+    }
+
+    .signal-dot {
+      width: 0.65rem;
+      height: 0.65rem;
+      border: 2px solid var(--green);
+      border-radius: 50%;
+      background: var(--green-dark);
+      box-shadow: 0 0 1.25rem var(--green);
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      font-family: var(--display);
+      text-wrap: balance;
+    }
+
+    .phrase {
+      display: inline-block;
+      white-space: nowrap;
+    }
+
+    .section-heading .feature-title {
+      max-width: none;
+    }
+
+    h1 {
+      max-width: 12ch;
+      font-size: clamp(3.25rem, 8vw, 6rem);
+      font-weight: 900;
+      line-height: 0.96;
+      letter-spacing: -0.035em;
+    }
+
+    h1 strong {
+      display: block;
+      color: var(--cyan-bright);
+      font-weight: inherit;
+    }
+
+    .hero-lead {
+      max-width: 58ch;
+      margin: var(--space-8) 0 0;
+      color: var(--muted);
+      font-size: clamp(1.05rem, 1.5vw, 1.2rem);
+      line-height: 1.75;
+      text-wrap: pretty;
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: var(--space-3);
+      margin-top: var(--space-8);
+    }
+
+    .button {
+      display: inline-flex;
+      min-height: 3.25rem;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-3);
+      padding: var(--space-3) var(--space-6);
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm);
+      font-family: var(--body);
+      font-size: 0.95rem;
+      font-weight: 750;
+      line-height: 1;
+      text-decoration: none;
+      cursor: pointer;
+      transition:
+        transform 180ms var(--ease-out),
+        background-color 180ms var(--ease-out),
+        border-color 180ms var(--ease-out),
+        color 180ms var(--ease-out);
+    }
+
+    .button:hover {
+      transform: translateY(-2px);
+    }
+
+    .button:active {
+      transform: translateY(0) scale(0.98);
+    }
+
+    .button-primary {
+      background: var(--cyan);
+      color: var(--bg);
+    }
+
+    .button-primary:hover {
+      background: var(--cyan-bright);
+    }
+
+    .button-secondary {
+      border-color: var(--line-strong);
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    .button-secondary:hover {
+      border-color: var(--cyan);
+      color: var(--cyan-bright);
+    }
+
+    .command {
+      display: flex;
+      max-width: 35rem;
+      min-height: 4.25rem;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-4);
+      margin-top: var(--space-6);
+      padding: var(--space-3) var(--space-5);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-md);
+      background: var(--surface);
+      box-shadow: 0 1.5rem 4rem oklch(0 0 0 / 0.28);
+    }
+
+    .command code {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      color: var(--green);
+      font-size: clamp(0.78rem, 2.7vw, 0.95rem);
+    }
+
+    .copy-button {
+      display: inline-flex;
+      min-width: 5.6rem;
+      min-height: 2.75rem;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      padding-inline: var(--space-4);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-sm);
+      background: var(--bg);
+      color: var(--ink);
+      font-size: 0.82rem;
+      font-weight: 750;
+      cursor: pointer;
+      transition: border-color 180ms var(--ease-out), color 180ms var(--ease-out);
+    }
+
+    .copy-button:hover {
+      border-color: var(--cyan);
+      color: var(--cyan-bright);
+    }
+
+    .copy-button[data-state="copied"] {
+      border-color: var(--green);
+      color: var(--green);
+    }
+
+    .hero-visual {
+      position: relative;
+      min-width: 0;
+    }
+
+    .visual-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: var(--space-3);
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      letter-spacing: 0.05em;
+    }
+
+    .visual-label span:last-child {
+      color: var(--green);
+    }
+
+    .terminal-frame {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-md);
+      background: var(--surface);
+      box-shadow:
+        1.5rem 1.5rem 0 var(--green-dark),
+        0 3rem 6rem oklch(0 0 0 / 0.42);
+      transform: rotate(1.2deg);
+      transform-origin: 60% 60%;
+      animation: terminal-in 800ms var(--ease-out) both;
+    }
+
+    .terminal-frame::before {
+      position: absolute;
+      z-index: 1;
+      inset: 0;
+      border: 0.35rem solid var(--surface);
+      content: "";
+      pointer-events: none;
+    }
+
+    .terminal-frame img {
+      width: 100%;
+      height: auto;
+    }
+
+    .measurement {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      margin-top: var(--space-6);
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
+    }
+
+    .measurement::before,
+    .measurement::after {
+      height: 1px;
+      flex: 1;
+      background: repeating-linear-gradient(
+        90deg,
+        var(--line-strong) 0,
+        var(--line-strong) 1px,
+        transparent 1px,
+        transparent 0.75rem
+      );
+      content: "";
+    }
+
+    .trust-strip {
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+    }
+
+    .trust-list {
+      display: grid;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .trust-item {
+      display: flex;
+      min-height: 6rem;
+      align-items: center;
+      gap: var(--space-4);
+      padding: var(--space-5) var(--space-6);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .trust-item:last-child {
+      border-bottom: 0;
+    }
+
+    .trust-icon {
+      display: grid;
+      width: 2.5rem;
+      height: 2.5rem;
+      flex: 0 0 auto;
+      border: 1px solid var(--line-strong);
+      place-items: center;
+      color: var(--green);
+      font-family: var(--mono);
+      font-size: 0.78rem;
+    }
+
+    .trust-icon svg {
+      width: 1.25rem;
+      height: 1.25rem;
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 1.6;
+    }
+
+    .trust-item strong {
+      display: block;
+      color: var(--ink);
+      font-size: 0.95rem;
+    }
+
+    .trust-item > div > span {
+      display: block;
+      margin-top: var(--space-1);
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    .section {
+      padding-block: clamp(4rem, 7vw, 7rem);
+      border-bottom: 1px solid var(--line);
+      background: var(--bg);
+    }
+
+    .section-heading {
+      max-width: 58rem;
+      margin-bottom: clamp(2.5rem, 5vw, 4.5rem);
+    }
+
+    .section-heading h2 {
+      max-width: 16ch;
+      font-size: clamp(2.6rem, 6vw, 5.25rem);
+      font-weight: 900;
+      line-height: 1;
+      letter-spacing: -0.03em;
+    }
+
+    .section-heading p {
+      max-width: 62ch;
+      margin: var(--space-6) 0 0;
+      color: var(--muted);
+      font-size: 1.05rem;
+      text-wrap: pretty;
+    }
+
+    .readout-grid {
+      display: grid;
+      gap: var(--space-8);
+    }
+
+    .readout-copy {
+      align-self: center;
+    }
+
+    .readout-copy h3 {
+      max-width: 15ch;
+      font-size: clamp(2rem, 4vw, 3.5rem);
+      font-weight: 850;
+      line-height: 1.04;
+      letter-spacing: -0.025em;
+    }
+
+    .readout-copy p {
+      max-width: 52ch;
+      margin: var(--space-5) 0 0;
+      color: var(--muted);
+      text-wrap: pretty;
+    }
+
+    .readout {
+      position: relative;
+      padding: clamp(1.5rem, 5vw, 3rem);
+      border: 1px solid var(--line-strong);
+      background: var(--surface);
+    }
+
+    .readout::before {
+      position: absolute;
+      top: -1px;
+      left: 10%;
+      width: 34%;
+      height: 1px;
+      background: var(--cyan);
+      content: "";
+    }
+
+    .readout-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: baseline;
+      gap: var(--space-6);
+      padding-block: var(--space-6);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .readout-row:first-child {
+      padding-top: 0;
+    }
+
+    .readout-row:last-child {
+      padding-bottom: 0;
+      border-bottom: 0;
+    }
+
+    .readout-label {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 0.85rem;
+    }
+
+    .readout-value {
+      color: var(--ink);
+      font-family: var(--mono);
+      font-size: clamp(1.1rem, 2.5vw, 1.5rem);
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+
+    .readout-value.good {
+      color: var(--green);
+    }
+
+    .readout-value.info {
+      color: var(--cyan-bright);
+    }
+
+    .safety {
+      overflow: hidden;
+      background: var(--green-dark);
+      color: oklch(0.97 0.01 140);
+    }
+
+    .safety-grid {
+      display: grid;
+      gap: clamp(3rem, 8vw, 8rem);
+      align-items: start;
+    }
+
+    .safety h2 {
+      max-width: none;
+      font-size: clamp(2.5rem, 5.2vw, 4.25rem);
+      font-weight: 900;
+      line-height: 0.98;
+      letter-spacing: -0.03em;
+    }
+
+    .safety-lead {
+      max-width: 48ch;
+      margin: var(--space-6) 0 0;
+      color: oklch(0.86 0.04 140);
+      font-size: 1.1rem;
+    }
+
+    .safety-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .safety-list li {
+      display: grid;
+      grid-template-columns: minmax(4.25rem, auto) 1fr;
+      gap: var(--space-4);
+      padding-block: var(--space-5);
+      border-bottom: 1px solid oklch(0.58 0.09 140);
+    }
+
+    .safety-list li:first-child {
+      border-top: 1px solid oklch(0.58 0.09 140);
+    }
+
+    .safety-list code {
+      color: var(--green);
+      font-size: 0.8rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .safety-list strong {
+      display: block;
+      font-size: 1.05rem;
+    }
+
+    .safety-list span {
+      display: block;
+      margin-top: var(--space-1);
+      color: oklch(0.83 0.04 140);
+      font-size: 0.9rem;
+    }
+
+    .steps {
+      display: grid;
+      counter-reset: step;
+    }
+
+    .step {
+      position: relative;
+      display: grid;
+      grid-template-columns: 3.5rem 1fr;
+      gap: var(--space-4);
+      padding-block: var(--space-8);
+      border-top: 1px solid var(--line);
+      counter-increment: step;
+    }
+
+    .step:last-child {
+      border-bottom: 1px solid var(--line);
+    }
+
+    .step::before {
+      color: var(--cyan);
+      content: "0" counter(step);
+      font-family: var(--mono);
+      font-size: 0.85rem;
+    }
+
+    .step h3 {
+      font-family: var(--body);
+      font-size: 1.15rem;
+      font-weight: 750;
+    }
+
+    .step p {
+      grid-column: 2;
+      max-width: 54ch;
+      margin: var(--space-2) 0 0;
+      color: var(--muted);
+    }
+
+    .step code {
+      color: var(--green);
+    }
+
+    .final-cta {
+      position: relative;
+      overflow: hidden;
+      padding-block: clamp(4.5rem, 9vw, 7.5rem);
+      background: var(--surface);
+      text-align: center;
+    }
+
+    .final-cta::before,
+    .final-cta::after {
+      position: absolute;
+      top: 50%;
+      width: 22vw;
+      height: 1px;
+      background: var(--line-strong);
+      content: "";
+    }
+
+    .final-cta::before {
+      left: 0;
+    }
+
+    .final-cta::after {
+      right: 0;
+    }
+
+    .final-cta h2 {
+      max-width: 13ch;
+      margin-inline: auto;
+      font-size: clamp(3rem, 8vw, 6rem);
+      font-weight: 900;
+      line-height: 0.97;
+      letter-spacing: -0.035em;
+    }
+
+    .final-cta p {
+      max-width: 48ch;
+      margin: var(--space-6) auto 0;
+      color: var(--muted);
+    }
+
+    .final-command {
+      margin-inline: auto;
+    }
+
+    .footer {
+      border-top: 1px solid var(--line);
+      background: var(--bg);
+    }
+
+    .footer-inner {
+      display: flex;
+      min-height: 6rem;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-4);
+      padding-block: var(--space-5);
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    .footer a {
+      color: var(--cyan-bright);
+      text-decoration-thickness: 1px;
+      text-underline-offset: 0.25em;
+    }
+
+    .status-message {
+      position: fixed;
+      z-index: 30;
+      right: max(1rem, env(safe-area-inset-right));
+      bottom: max(1rem, env(safe-area-inset-bottom));
+      max-width: calc(100% - 2rem);
+      padding: var(--space-3) var(--space-4);
+      border: 1px solid var(--green);
+      border-radius: var(--radius-sm);
+      background: var(--surface-high);
+      color: var(--green);
+      font-size: 0.9rem;
+      font-weight: 700;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(1rem);
+      transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
+    }
+
+    .status-message.is-visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    @keyframes terminal-in {
+      from {
+        opacity: 0;
+        filter: blur(10px);
+        transform: translate3d(3rem, 2rem, 0) rotate(3deg);
+      }
+      to {
+        opacity: 1;
+        filter: blur(0);
+        transform: translate3d(0, 0, 0) rotate(1.2deg);
+      }
+    }
+
+    @media (min-width: 48rem) {
+      .container {
+        width: min(calc(100% - 4rem), var(--container));
+      }
+
+      .trust-list {
+        grid-template-columns: repeat(3, 1fr);
+      }
+
+      .trust-item {
+        border-right: 1px solid var(--line);
+        border-bottom: 0;
+      }
+
+      .trust-item:last-child {
+        border-right: 0;
+      }
+
+      .step {
+        grid-template-columns: 5rem minmax(14rem, 0.65fr) minmax(20rem, 1.35fr);
+        align-items: start;
+      }
+
+      .step p {
+        grid-column: 3;
+        margin-top: 0;
+      }
+    }
+
+    @media (min-width: 64rem) {
+      .hero-grid {
+        grid-template-columns: minmax(20rem, 0.82fr) minmax(28rem, 1.18fr);
+      }
+
+      .readout-grid {
+        grid-template-columns: minmax(18rem, 0.85fr) minmax(24rem, 1.15fr);
+        gap: clamp(4rem, 9vw, 9rem);
+      }
+
+      .safety-grid {
+        grid-template-columns: minmax(20rem, 0.95fr) minmax(22rem, 1.05fr);
+      }
+    }
+
+    @media (min-width: 75rem) {
+      .step {
+        grid-template-columns: 5rem minmax(12rem, 0.45fr) minmax(0, 1.55fr);
+      }
+
+      .step p {
+        max-width: none;
+        white-space: nowrap;
+      }
+    }
+
+    @media (max-width: 63.99rem) {
+      .hero::after {
+        display: none;
+      }
+
+      .hero-copy {
+        max-width: none;
+      }
+
+      h1 {
+        max-width: 10ch;
+      }
+
+      .terminal-frame {
+        box-shadow:
+          0.75rem 0.75rem 0 var(--green-dark),
+          0 2rem 4rem oklch(0 0 0 / 0.38);
+        transform: none;
+        animation-name: terminal-in-mobile;
+      }
+    }
+
+    @media (max-width: 47.99rem) {
+      .nav-link:first-child {
+        display: none;
+      }
+
+      .brand {
+        font-size: 0.86rem;
+      }
+
+      .readout-row {
+        grid-template-columns: 1fr;
+        gap: var(--space-2);
+      }
+
+      .readout-value {
+        text-align: left;
+      }
+
+      .final-cta::before,
+      .final-cta::after {
+        display: none;
+      }
+    }
+
+    @keyframes terminal-in-mobile {
+      from {
+        opacity: 0;
+        filter: blur(8px);
+        transform: translateY(1.5rem);
+      }
+      to {
+        opacity: 1;
+        filter: blur(0);
+        transform: translateY(0);
+      }
+    }
+
+    @media (max-width: 29.99rem) {
+      .nav-link {
+        padding-inline: var(--space-3);
+      }
+
+      @media (max-width: 22.5rem) {
+        .container {
+          width: min(calc(100% - 2rem), var(--container));
+        }
+      }
+
+      .command {
+        align-items: stretch;
+        flex-direction: column;
+        padding: var(--space-4);
+      }
+
+      .copy-button {
+        width: 100%;
+      }
+
+      .hero-actions {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .button {
+        width: 100%;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html {
+        scroll-behavior: auto;
+      }
+
+      *,
+      *::before,
+      *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+
+    @media print {
+      body {
+        background: var(--bg);
+      }
+
+      .site-header,
+      .copy-button,
+      .status-message {
+        display: none;
+      }
+
+      .hero,
+      .section,
+      .final-cta {
+        break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要內容</a>
+
+  <header class="site-header">
+    <nav class="nav container" aria-label="主要導覽">
+      <a class="brand" href="#top" aria-label="Codex Reset Checker 首頁">
+        <span class="brand-mark" aria-hidden="true">CR</span>
+        Codex Reset Checker
+      </a>
+      <div class="nav-links">
+        <a class="nav-link" href="#features">功能</a>
+        <a class="nav-link" href="https://github.com/doggy8088/codex-reset-checker" target="_blank" rel="noreferrer">GitHub ↗</a>
+      </div>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="top">
+      <div class="hero-grid container">
+        <div class="hero-copy">
+          <div class="signal">
+            <span class="signal-dot" aria-hidden="true"></span>
+            SYSTEM READY · READ ONLY
+          </div>
+          <h1>額度，<strong>不用猜。</strong></h1>
+          <p class="hero-lead">
+            在終端機快速查看 Codex 使用額度、重置倒數與手動重置額度。
+            不安裝依賴、不修改檔案，也不把你的憑證送去奇怪的地方。
+          </p>
+          <div class="command" aria-label="安裝並執行指令">
+            <code>npx @willh/codex-reset-checker</code>
+            <button class="copy-button" type="button" data-copy="npx @willh/codex-reset-checker">複製指令</button>
+          </div>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#install">立即使用 <span aria-hidden="true">↓</span></a>
+            <a class="button button-secondary" href="https://github.com/doggy8088/codex-reset-checker" target="_blank" rel="noreferrer">
+              查看原始碼 <span aria-hidden="true">↗</span>
+            </a>
+          </div>
+        </div>
+
+        <div class="hero-visual">
+          <div class="visual-label" aria-hidden="true">
+            <span>LIVE OUTPUT / v0.6.0</span>
+            <span>● CONNECTED</span>
+          </div>
+          <figure class="terminal-frame">
+            <img
+              src="./codex-reset-checker-v060.png"
+              width="2000"
+              height="1010"
+              alt="Codex Reset Checker 終端機畫面，顯示每週使用額度、Spark 額度、重置倒數與三筆手動重置額度"
+              fetchpriority="high"
+              decoding="async"
+            >
+          </figure>
+          <div class="measurement" aria-hidden="true">2000 × 1010 / TERMINAL CAPTURE</div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="trust-strip" aria-label="產品特點">
+      <ul class="trust-list container">
+        <li class="trust-item">
+          <span class="trust-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"></path>
+              <path d="m4.5 7.8 7.5 4.3 7.5-4.3M12 12.1V21"></path>
+            </svg>
+          </span>
+          <div><strong>零依賴</strong><span>Node.js 14+，npx 直接執行</span></div>
+        </li>
+        <li class="trust-item">
+          <span class="trust-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M12 3 20 6v5c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10V6l8-3Z"></path>
+              <path d="m8.5 12 2.2 2.2 4.8-5"></path>
+            </svg>
+          </span>
+          <div><strong>唯讀查詢</strong><span>不修改 auth.json，不保存資料</span></div>
+        </li>
+        <li class="trust-item">
+          <span class="trust-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <rect x="3" y="4" width="13" height="10" rx="1.5"></rect>
+              <path d="M7 19h5m-2-5v5"></path>
+              <rect x="16" y="10" width="5" height="9" rx="1.2"></rect>
+            </svg>
+          </span>
+          <div><strong>跨平台</strong><span>macOS、Linux、Windows 都能用</span></div>
+        </li>
+      </ul>
+    </aside>
+
+    <section class="section" id="features">
+      <div class="container">
+        <header class="section-heading">
+          <h2 class="feature-title"><span class="phrase">你真正想知道的，</span><br><span class="phrase">都在同一個畫面。</span></h2>
+          <p>
+            不用打開設定頁、不用換算時間，也不用從 API 原始資料裡找答案。
+            工具把不同額度視窗整理成清楚、可掃讀的終端機資訊。
+          </p>
+        </header>
+
+        <div class="readout-grid">
+          <div class="readout-copy">
+            <h3><span class="phrase">剩多少、</span><span class="phrase">何時重置，</span><span class="phrase">直接說人話。</span></h3>
+            <p>
+              同時顯示主要每週額度、模型專用額度與手動重置額度。
+              百分比、倒數和到期時間各司其職，不讓顏色單獨承擔資訊。
+            </p>
+          </div>
+          <div class="readout" aria-label="輸出內容範例">
+            <div class="readout-row">
+              <span class="readout-label">每週用量上限</span>
+              <span class="readout-value good">74% 剩餘</span>
+            </div>
+            <div class="readout-row">
+              <span class="readout-label">GPT-5.3-Codex-Spark</span>
+              <span class="readout-value good">75% 剩餘</span>
+            </div>
+            <div class="readout-row">
+              <span class="readout-label">下次重置</span>
+              <span class="readout-value info">約 6d 6h 12m</span>
+            </div>
+            <div class="readout-row">
+              <span class="readout-label">手動重置額度</span>
+              <span class="readout-value">3 筆可用</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section safety" aria-labelledby="safety-title">
+      <div class="safety-grid container">
+        <div>
+          <h2 id="safety-title"><span class="phrase">你的憑證，</span><br><span class="phrase">留在你的電腦。</span></h2>
+          <p class="safety-lead">
+            這是一套查詢工具，不是另一個需要登入、同步或註冊的平台。
+            安全不是附加功能，是整個工具的邊界。
+          </p>
+        </div>
+        <ul class="safety-list">
+          <li>
+            <code>[MASK]</code>
+            <div><strong>不輸出敏感值</strong><span>access_token 與 account_id 永不出現在輸出中。</span></div>
+          </li>
+          <li>
+            <code>[READ]</code>
+            <div><strong>不修改登入檔案</strong><span>只讀取本機 Codex auth.json，不寫入、不搬移。</span></div>
+          </li>
+          <li>
+            <code>[LOCAL]</code>
+            <div><strong>不追蹤使用行為</strong><span>沒有資料庫、遙測、快取或背景常駐服務。</span></div>
+          </li>
+          <li>
+            <code>[OPEN]</code>
+            <div><strong>原始碼公開</strong><span>每一行請求與遮罩邏輯都能在 GitHub 檢查。</span></div>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section" id="install">
+      <div class="container">
+        <header class="section-heading">
+          <h2><span class="phrase">三步，</span><span class="phrase">回到你真正</span><span class="phrase">要做的事。</span></h2>
+          <p>不用建立設定檔。Codex 已登入，就能直接查詢。</p>
+        </header>
+        <div class="steps">
+          <article class="step">
+            <h3>確認 Codex 已登入</h3>
+            <p>工具預設讀取 <code>~/.codex/auth.json</code>；Windows 會自動使用使用者目錄。</p>
+          </article>
+          <article class="step">
+            <h3>執行一行指令</h3>
+            <p><code>npx @willh/codex-reset-checker</code>，不需全域安裝。</p>
+          </article>
+          <article class="step">
+            <h3>需要時持續監看</h3>
+            <p>加上 <code>--watch</code> 每分鐘自動刷新；Spacebar 立即刷新，按 q 結束。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="final-cta" aria-labelledby="cta-title">
+      <div class="container">
+        <h2 id="cta-title">查一下。<br>心裡有底。</h2>
+        <p>一行指令，掌握剩餘額度與重置時間。簡單到不用寫另一份教學。</p>
+        <div class="command final-command" aria-label="執行 Codex Reset Checker">
+          <code>npx @willh/codex-reset-checker</code>
+          <button class="copy-button" type="button" data-copy="npx @willh/codex-reset-checker">複製指令</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-inner container">
+      <span>Codex Reset Checker · MIT License</span>
+      <span>由 <a href="https://github.com/doggy8088" target="_blank" rel="noreferrer">Will 保哥</a> 製作 · <a href="https://www.npmjs.com/package/@willh/codex-reset-checker" target="_blank" rel="noreferrer">npm ↗</a></span>
+    </div>
+  </footer>
+
+  <div class="status-message" role="status" aria-live="polite">指令已複製，可以開工了。</div>
+
+  <script>
+    const copyButtons = document.querySelectorAll("[data-copy]");
+    const statusMessage = document.querySelector(".status-message");
+    let statusTimer;
+
+    async function copyCommand(button) {
+      const command = button.dataset.copy;
+
+      try {
+        await navigator.clipboard.writeText(command);
+      } catch {
+        const textarea = document.createElement("textarea");
+        textarea.value = command;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        textarea.remove();
+      }
+
+      copyButtons.forEach((item) => {
+        item.dataset.state = "copied";
+        item.textContent = "已複製";
+      });
+      statusMessage.classList.add("is-visible");
+      window.clearTimeout(statusTimer);
+      statusTimer = window.setTimeout(() => {
+        copyButtons.forEach((item) => {
+          delete item.dataset.state;
+          item.textContent = "複製指令";
+        });
+        statusMessage.classList.remove("is-visible");
+      }, 2200);
+    }
+
+    copyButtons.forEach((button) => {
+      button.addEventListener("click", () => copyCommand(button));
+    });
+  </script>
+</body>
+</html>

@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.6.1] - 2026-07-14
+
+### Added
+
+- 新增位於 `public/` 的一頁式產品介紹頁，提供響應式桌機、平板與手機版面。
+- 新增產品操作截圖、可複製的 `npx @willh/codex-reset-checker` 指令與清楚的安全隱私說明。
+- 新增 canonical、robots、Open Graph、Twitter Card 與 `WebSite`、`SoftwareApplication` JSON-LD 結構化資料。
+- 新增以實際產品頁擷取並針對 Facebook 最佳化的 1200 × 630 JPEG 分享圖片。
+- 新增 `PRODUCT.md`，記錄產品定位、使用者、品牌個性、設計原則與無障礙方向。
+- 新增 CLI 未知選項、重複路徑、缺少 `--auth` 參數與敏感 JSON 輸出的測試。
+
+### Changed
+
+- CLI 參數解析改為拒絕未知選項、重複 `auth.json` 路徑與缺少值的 `--auth`，並支援 `--auth=<path>`。
+- API 請求新增固定 15 秒牆鐘期限與 1 MiB 回應大小上限，避免慢速串流或異常回應長時間占用程序。
+- JSON 輸出會再次遮罩 API 回應中可能出現的 `access_token` 與 `account_id`。
+- 監看模式可從同一個輸入 chunk 正確辨識 `q` 或 `Ctrl+C` 並結束。
+
+### Fixed
+
+- 修正 HTTP response stream 錯誤未被明確處理的問題。
+- 修正以 socket inactivity timeout 代替完整請求期限，導致持續傳輸的請求可能永不逾時。
+- 修正監看模式收到批次鍵盤輸入時可能漏掉 `q` 結束指令。
+- 修正產品頁在手機與平板斷點的欄位溢位、中文詞組斷行、指令框 padding 與圖示對齊問題。
+
 ## [0.6.0] - 2026-07-14
 
 ### Added

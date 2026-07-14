@@ -13,6 +13,8 @@ const CREDIT_WIDTH = 54;
 const CREDIT_GAP = 2;
 const WATCH_INTERVAL_MS = 60_000;
 const RESIZE_DEBOUNCE_MS = 100;
+const REQUEST_TIMEOUT_MS = 15_000;
+const MAX_RESPONSE_BYTES = 1_048_576;
 const APP_VERSION = (() => {
   try {
     const pkgPath = path.join(__dirname, '..', 'package.json');
@@ -87,15 +89,45 @@ function getCliOptions(cliArgs) {
       continue;
     }
 
-    if (arg === '--auth' && cliArgs[i + 1]) {
-      authPath = cliArgs[i + 1];
+    if (arg === '--auth') {
+      const value = cliArgs[i + 1];
+      if (!value || value.startsWith('-')) {
+        throw new Error('--auth 需要指定 auth.json 路徑');
+      }
+
+      if (authPath) {
+        throw new Error('--auth 只能指定一次');
+      }
+
+      authPath = value;
       i += 1;
       continue;
     }
 
-    if (!arg.startsWith('-') && !authPath) {
-      authPath = arg;
+    if (arg.startsWith('--auth=')) {
+      const value = arg.slice('--auth='.length);
+      if (!value) {
+        throw new Error('--auth 需要指定 auth.json 路徑');
+      }
+
+      if (authPath) {
+        throw new Error('--auth 只能指定一次');
+      }
+
+      authPath = value;
+      continue;
     }
+
+    if (!arg.startsWith('-')) {
+      if (authPath) {
+        throw new Error('只能指定一個 auth.json 路徑');
+      }
+
+      authPath = arg;
+      continue;
+    }
+
+    throw new Error(`未知選項：${arg}`);
   }
 
   if (authPath) {
@@ -267,6 +299,10 @@ function humanizeRemaining(expireValue) {
 }
 
 function loadAuth(authPath) {
+  if (typeof authPath !== 'string' || !authPath.trim()) {
+    throw new Error('auth.json 路徑不可為空');
+  }
+
   if (!fs.existsSync(authPath)) {
     throw new Error(`找不到 auth.json：${authPath}`);
   }
@@ -336,15 +372,45 @@ function formatResponseBody(body, sensitiveValues) {
   return ` 回應內容：${shortened}`;
 }
 
-function requestJson(apiUrl, accessToken, accountId, additionalHeaders = {}) {
+function requestJson(apiUrl, accessToken, accountId, additionalHeaders = {}, dependencies = {}) {
   const headers = {
     ...buildApiHeaders(accessToken, accountId),
     ...additionalHeaders,
   };
   const sensitiveValues = [accessToken, accountId];
   const endpoint = new URL(apiUrl);
+  const setTimeoutFunction = dependencies.setTimeoutFunction || setTimeout;
+  const clearTimeoutFunction = dependencies.clearTimeoutFunction || clearTimeout;
 
   return new Promise((resolve, reject) => {
+    let settled = false;
+    let timeoutHandle = null;
+    const clearDeadline = () => {
+      if (timeoutHandle !== null) {
+        clearTimeoutFunction(timeoutHandle);
+        timeoutHandle = null;
+      }
+    };
+    const fail = (error) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearDeadline();
+      reject(error);
+    };
+
+    const succeed = (value) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearDeadline();
+      resolve(value);
+    };
+
     const req = https.request(
       {
         method: 'GET',
@@ -354,29 +420,61 @@ function requestJson(apiUrl, accessToken, accountId, additionalHeaders = {}) {
       },
       (res) => {
         let chunks = '';
+        let responseBytes = 0;
 
         res.on('data', (chunk) => {
-          chunks += chunk.toString('utf8');
+          if (settled) {
+            return;
+          }
+
+          const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+          responseBytes += buffer.length;
+          if (responseBytes > MAX_RESPONSE_BYTES) {
+            const error = new Error(`API 回應超過 ${MAX_RESPONSE_BYTES} bytes 上限`);
+            fail(error);
+            if (typeof req.destroy === 'function') {
+              req.destroy();
+            }
+            return;
+          }
+
+          chunks += buffer.toString('utf8');
         });
 
         res.on('end', () => {
+          if (settled) {
+            return;
+          }
+
           if (res.statusCode < 200 || res.statusCode >= 300) {
             const message = formatResponseBody(chunks, sensitiveValues);
-            reject(new Error(`請求 API 失敗，HTTP ${res.statusCode} ${res.statusMessage}.${message}`));
+            fail(new Error(`請求 API 失敗，HTTP ${res.statusCode} ${res.statusMessage}.${message}`));
             return;
           }
 
           try {
-            resolve(JSON.parse(chunks));
+            succeed(JSON.parse(chunks));
           } catch (error) {
-            reject(new Error(`回應 JSON 解析失敗：${error.message}`));
+            fail(new Error(`回應 JSON 解析失敗：${error.message}`));
           }
+        });
+
+        res.on('error', (error) => {
+          fail(new Error(`請求 API 失敗：${error.message}`));
         });
       }
     );
 
+    timeoutHandle = setTimeoutFunction(() => {
+      const error = new Error(`請求 API 逾時（超過 ${REQUEST_TIMEOUT_MS / 1000} 秒）`);
+      fail(error);
+      if (typeof req.destroy === 'function') {
+        req.destroy();
+      }
+    }, REQUEST_TIMEOUT_MS);
+
     req.on('error', (error) => {
-      reject(new Error(`請求 API 失敗：${error.message}`));
+      fail(new Error(`請求 API 失敗：${error.message}`));
     });
 
     req.end();
@@ -1283,7 +1381,7 @@ async function runOnce(options) {
   const accessToken = tokens.access_token;
   const accountId = tokens.account_id;
 
-  if (!accessToken) {
+  if (typeof accessToken !== 'string' || !accessToken.trim()) {
     throw new Error('auth.json 內未找到 tokens.access_token');
   }
 
@@ -1358,7 +1456,7 @@ async function runOnce(options) {
       ]);
     }
 
-    console.log(JSON.stringify(output));
+    console.log(sanitizeSensitiveText(JSON.stringify(output), [accessToken, accountId]));
     return;
   }
 

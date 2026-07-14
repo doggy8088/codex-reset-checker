@@ -1,0 +1,25 @@
+{
+  "azure_blob": {
+    "prefix": null,
+    "sas_url_env": "NOW_AZURE_BLOB_SAS_URL"
+  },
+  "azure_swa": {
+    "deployment_token_env": "SWA_CLI_DEPLOYMENT_TOKEN",
+    "environment": "production"
+  },
+  "base_url": "https://lemon-ground-0f66b9800.7.azurestaticapps.net",
+  "default_url": "https://lemon-ground-0f66b9800.7.azurestaticapps.net",
+  "firebase": {
+    "project": null,
+    "site": null
+  },
+  "ftp": {
+    "host": null,
+    "password_env": "NOW_FTP_PASSWORD",
+    "remote_dir": "/",
+    "username_env": "NOW_FTP_USERNAME"
+  },
+  "move_publishable_files_to_public": false,
+  "provider": "azure-static-web-app",
+  "source": null
+}
