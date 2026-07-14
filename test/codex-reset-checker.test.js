@@ -29,6 +29,10 @@ function createFakeHttps(responses) {
         return;
       }
 
+      if (responseConfig.hang) {
+        return;
+      }
+
       const response = new EventEmitter();
       response.statusCode = responseConfig.statusCode === undefined ? 200 : responseConfig.statusCode;
       response.statusMessage = responseConfig.statusMessage || 'OK';
@@ -260,6 +264,7 @@ async function testUsageLayoutUsesManualResetWidthCap() {
 async function testWatchCliOptions() {
   const longOption = checker.getCliOptions(['--watch', '--auth', '/tmp/auth.json']);
   const shortOption = checker.getCliOptions(['-w', '/tmp/short-auth.json']);
+  const equalsOption = checker.getCliOptions(['--auth=/tmp/equals-auth.json']);
 
   assert.deepStrictEqual(longOption, {
     authPath: '/tmp/auth.json',
@@ -271,6 +276,19 @@ async function testWatchCliOptions() {
     json: false,
     watch: true,
   });
+  assert.strictEqual(equalsOption.authPath, '/tmp/equals-auth.json');
+  assert.throws(
+    () => checker.getCliOptions(['--auth']),
+    /--auth 需要指定 auth\.json 路徑/
+  );
+  assert.throws(
+    () => checker.getCliOptions(['--unknown']),
+    /未知選項：--unknown/
+  );
+  assert.throws(
+    () => checker.getCliOptions(['/tmp/one.json', '/tmp/two.json']),
+    /只能指定一個 auth\.json 路徑/
+  );
 }
 
 async function testWatchRefreshesOnIntervalAndTerminalResize() {
@@ -517,7 +535,7 @@ async function testWatchCountdownAndSpacebarRefresh() {
   assert.strictEqual(intervals.filter((item) => item.delay === 60_000).length, 2);
   assert.ok(clearedIntervals.includes(originalAutoRefreshTimer));
 
-  input.emit('data', Buffer.from('q'));
+  input.emit('data', Buffer.from(' q'));
   assert.deepStrictEqual(rawModeChanges, [true, false]);
   assert.strictEqual(input.listenerCount('data'), 0);
   assert.strictEqual(paused, true);
@@ -590,6 +608,35 @@ async function testRequestsReuseHeadersAndEndpoints() {
   });
 }
 
+async function testRequestJsonUsesWallClockDeadline() {
+  let timeoutCallback = null;
+  const clearedTimeouts = [];
+
+  await withFakeHttps({
+    '/never-responds': { hang: true },
+  }, async () => {
+    const pendingRequest = checker.requestJson(
+      'https://chatgpt.com/never-responds',
+      'token-secret',
+      'account-secret',
+      {},
+      {
+        setTimeoutFunction: (callback, delay) => {
+          assert.strictEqual(delay, 15_000);
+          timeoutCallback = callback;
+          return 'deadline-handle';
+        },
+        clearTimeoutFunction: (handle) => clearedTimeouts.push(handle),
+      }
+    );
+
+    assert.strictEqual(typeof timeoutCallback, 'function');
+    timeoutCallback();
+    await assert.rejects(pendingRequest, /請求 API 逾時（超過 15 秒）/);
+    assert.deepStrictEqual(clearedTimeouts, ['deadline-handle']);
+  });
+}
+
 async function testUsageHttpFailuresKeepManualJsonAndMaskToken() {
   const auth = createAuthFile();
 
@@ -645,6 +692,39 @@ async function testSuccessfulJsonKeepsRawUsageAndAddsNormalizedUsage() {
     assert.strictEqual(output.usage.primary_window.used_percent, 42);
     assert.strictEqual(output.usage.primary_window.remaining_percent, 58);
     assert.strictEqual(captured.stderr.length, 0);
+  } finally {
+    auth.cleanup();
+  }
+}
+
+async function testJsonOutputMasksSensitiveValuesFromApiResponse() {
+  const auth = createAuthFile();
+
+  try {
+    const captured = await captureMain(
+      ['--auth', auth.authPath, '--json'],
+      {
+        '/backend-api/wham/rate-limit-reset-credits': {
+          body: {
+            available_count: 2,
+            credits: [
+              {
+                granted_at: '2026-07-13T00:00:00Z',
+                expires_at: '2026-07-20T00:00:00Z',
+                note: 'token-secret account-secret',
+              },
+            ],
+            token: 'token-secret',
+            account: 'account-secret',
+          },
+        },
+        '/backend-api/wham/usage': { body: usageResponse() },
+      }
+    );
+
+    assert.ok(!captured.stdout.join('\n').includes('token-secret'));
+    assert.ok(!captured.stdout.join('\n').includes('account-secret'));
+    assert.ok(captured.stdout.join('\n').includes('[已隱藏]'));
   } finally {
     auth.cleanup();
   }
@@ -735,8 +815,10 @@ const tests = [
   ['watch 顯示倒數、Spacebar 無空白等待刷新並可以 q 結束', testWatchCountdownAndSpacebarRefresh],
   ['watch 輸出最後一行顯示操作提示', testWatchHumanOutputEndsWithControls],
   ['兩個端點共用標頭且路徑正確', testRequestsReuseHeadersAndEndpoints],
+  ['API 請求使用固定 15 秒牆鐘期限', testRequestJsonUsesWallClockDeadline],
   ['使用額度 HTTP 錯誤仍保留手動額度並遮罩敏感值', testUsageHttpFailuresKeepManualJsonAndMaskToken],
   ['JSON 同時保留標準化與原始使用額度', testSuccessfulJsonKeepsRawUsageAndAddsNormalizedUsage],
+  ['JSON API 回應中的敏感值會被遮罩', testJsonOutputMasksSensitiveValuesFromApiResponse],
   ['使用額度失敗時仍顯示人類可讀的手動額度', testUsageFailureKeepsHumanManualOutput],
   ['終端輸出分開顯示兩類額度', testHumanOutputSeparatesBothCreditTypes],
 ];
