@@ -9,7 +9,7 @@
 - `使用額度`：目前工作階段、每週視窗，以及 API 有提供時的模型專用額度之已使用比例、剩餘比例及重置倒數。
 - `手動重置額度`：可用次數，以及每筆額度的取得時間、到期時間與剩餘時間。
 
-整個流程只做查詢，不會修改本機檔案，也不會輸出 `access_token` 或 `account_id`。
+一般查詢不會修改本機檔案。只有明確使用 `--ics` 時才會建立行事曆檔案；任何模式都不會輸出 `access_token` 或 `account_id`。
 
 快速開始：
 
@@ -43,6 +43,8 @@ npx @willh/codex-reset-checker
 .
 ├─ bin/
 │  └─ codex-reset-checker.js      Node.js CLI 主程式
+├─ lib/
+│  └─ ics.js                      iCalendar 複選、產生與匯出共用模組
 ├─ assets/
 │  └─ codex-reset-checker-screenshot.png
 ├─ test/
@@ -93,6 +95,20 @@ codex-reset-checker --auth /path/to/auth.json --json
 ```
 
 `--json` 會在保留手動重置 API 原始欄位的前提下，輸出單行 JSON。輸出會新增標準化的 `usage` 欄位，並以 `usage_raw` 保留 `/wham/usage` 的原始回應，適合交給其他工具處理。使用額度查詢失敗時，`usage` 會是 `null`，並新增 `usage_error`；警告會輸出至標準錯誤，不混入 JSON 標準輸出。
+
+### 匯出 iCalendar
+
+```bash
+codex-reset-checker --ics
+codex-reset-checker --ics --output ./codex-reset-reminders.ics
+codex-reset-checker --auth /path/to/auth.json --ics
+```
+
+`--ics` 會列出狀態為 `active` 或 `available`、時間可解析且尚未到期的手動重置額度。使用方向鍵移動，按 `Spacebar` 複選，按 `Enter` 匯出，或按 `q`、`Esc` 取消。清單預設不勾選任何項目。
+
+每筆選取額度會在同一個 `.ics` 檔建立一筆期間事件。事件從原始 `expires_at` 往前 72 小時開始，並於 `expires_at` 結束；描述保留 `status`、`granted_at`、原始 `expires_at` 與事件開始時間。未指定 `--output` 時，檔案會建立在目前工作目錄，名稱格式為 `codex-reset-credits-YYYYMMDD-HHmmss.ics`。
+
+程式不會覆寫既有檔案。寫入成功後會自動開啟檔案所在資料夾；若作業系統無法開啟資料夾，檔案仍會保留並顯示警告。`--ics` 只能在互動式終端機使用，且不能與 `--json` 或 `--watch` 同時使用。
 
 ### 持續監看
 
@@ -289,6 +305,9 @@ JSON 輸出範例：
 - `錯誤：請求 API 失敗，HTTP 401 Unauthorized...`
 - `錯誤：請求 API 失敗，HTTP 403 Forbidden...`
 - `警告：使用額度查詢失敗，仍顯示手動重置額度。...`
+- `錯誤：--ics 需要互動式終端機`
+- `錯誤：輸出檔案已存在，未覆寫：<path>`
+- `警告：無法自動開啟輸出資料夾。...`
 
 手動重置額度查詢失敗時，程式會以非零狀態退出。使用額度查詢是附加流程；若該端點收到 401、429、5xx 或回應格式無法解析，程式仍會顯示手動重置額度。`--json` 模式會以 `usage: null` 與 `usage_error` 表示這個狀態。
 
@@ -305,6 +324,7 @@ JSON 輸出範例：
 - 失敗解析時保留原始值，不中斷輸出
 - `使用額度` 以 `reset_at` 計算距離重置的倒數；若缺少 `reset_at`，改用 `reset_after_seconds`
 - `usage_raw` 與手動重置資料在 `--json` 模式保留 API 原始值
+- `.ics` 事件使用 UTC；`DTSTART` 為 `expires_at - 72 小時`，`DTEND` 為原始 `expires_at`
 
 * * *
 
@@ -348,9 +368,9 @@ CI 會在 `main` 的 push 與所有 pull request 上，使用 Node.js 14、18、
 ## 11. 安全與隱私原則
 
 - 不安裝任何非必要套件
-- 不修改任何本機檔案
+- 一般查詢不修改本機檔案；只有 `--ics` 會寫入使用者指定或目前工作目錄中的行事曆檔案
 - 不輸出 `access_token` 或 `account_id`
 - 只讀取本機 `auth.json`
-- 無資料持久化、無快取、無遙測
+- 除使用者要求的 `.ics` 外，無資料持久化、無快取、無遙測
 
 `/wham/usage` 並非 OpenAI 公開 API，回應格式、權限與可用性可能變更。這項功能顯示的是 Codex 工作階段與週期的使用額度，不宣稱為可購買 Credits 的餘額。OpenAI 官方目前說明可在 ChatGPT 的 Codex Settings > Usage Dashboard 查看 Credits 餘額，未提供本工具可依賴的公開 Access Token API：[Using Credits for Flexible Usage in ChatGPT](https://help.openai.com/en/articles/12642688-using-credits-for-flexible-usage-in-chatgpt-plus-pro)。

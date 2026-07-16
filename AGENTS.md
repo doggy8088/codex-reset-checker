@@ -3,6 +3,7 @@
 ## Project Structure
 
 - `bin/codex-reset-checker.js`: CommonJS CLI and npm entry point.
+- `lib/ics.js`: reusable iCalendar selection, generation, and export workflow.
 - `test/codex-reset-checker.test.js`: test suite.
 - `scripts/`: legacy Bash and PowerShell helpers.
 - `public/`: GitHub Pages site; `assets/`: images.
