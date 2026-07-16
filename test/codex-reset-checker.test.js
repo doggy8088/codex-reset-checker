@@ -435,6 +435,76 @@ async function testBuildIcsCalendarUsesUtcEscapingAndFolding() {
   assert.ok(calendar.endsWith('\r\n'));
 }
 
+async function testBuildIcsCalendarUidIsStableAcrossCreditOrdering() {
+  const entry = {
+    originalIndex: 0,
+    expiresAt: new Date('2026-07-20T12:30:00Z'),
+    eventAt: new Date('2026-07-17T12:30:00Z'),
+    credit: {
+      status: 'active',
+      granted_at: '2026-07-10T00:00:00Z',
+      expires_at: '2026-07-20T12:30:00Z',
+    },
+  };
+  const reorderedEntry = {
+    ...entry,
+    originalIndex: 7,
+  };
+  const firstCalendar = ics.buildIcsCalendar([entry]);
+  const reorderedCalendar = ics.buildIcsCalendar([reorderedEntry]);
+  const uidPattern = /UID:([a-f0-9]{24}@codex-reset-checker)/;
+  const firstUid = firstCalendar.match(uidPattern);
+  const reorderedUid = reorderedCalendar.match(uidPattern);
+
+  assert.ok(firstUid);
+  assert.ok(reorderedUid);
+  assert.strictEqual(firstUid[1], reorderedUid[1]);
+}
+
+async function testBuildIcsCalendarUidUsesIntrinsicCreditTimes() {
+  const entries = [
+    {
+      originalIndex: 0,
+      expiresAt: new Date('2026-07-20T12:30:00Z'),
+      eventAt: new Date('2026-07-17T12:30:00Z'),
+      credit: {
+        status: 'active',
+        granted_at: '2026-07-10T00:00:00Z',
+        expires_at: '2026-07-20T12:30:00Z',
+      },
+    },
+    {
+      originalIndex: 0,
+      expiresAt: new Date('2026-07-20T12:30:00Z'),
+      eventAt: new Date('2026-07-17T12:30:00Z'),
+      credit: {
+        status: 'active',
+        granted_at: '2026-07-11T00:00:00Z',
+        expires_at: '2026-07-20T12:30:00Z',
+      },
+    },
+    {
+      originalIndex: 0,
+      expiresAt: new Date('2026-07-21T12:30:00Z'),
+      eventAt: new Date('2026-07-18T12:30:00Z'),
+      credit: {
+        status: 'active',
+        granted_at: '2026-07-10T00:00:00Z',
+        expires_at: '2026-07-21T12:30:00Z',
+      },
+    },
+  ];
+  const calendar = ics.buildIcsCalendar(entries);
+  const uidLines = calendar.match(/UID:[a-f0-9]{24}@codex-reset-checker/g) || [];
+  const uids = uidLines.map((line) => line.slice('UID:'.length));
+
+  assert.strictEqual(uids.length, 3);
+  assert.strictEqual(new Set(uids).size, 3);
+  uids.forEach((uid) => {
+    assert.match(uid, /^[a-f0-9]{24}@codex-reset-checker$/);
+  });
+}
+
 async function testResolveIcsOutputPathAndExclusiveWrite() {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-reset-ics-'));
   const generated = ics.resolveIcsOutputPath(null, {
@@ -1211,6 +1281,8 @@ const tests = [
   ['ICS helper 由共用模組匯出', testIcsHelpersAreExportedFromSharedModule],
   ['ICS 只匯出有效且未到期額度', testEligibleCreditsRequireActiveFutureExpiry],
   ['ICS 使用 UTC、跳脫與 UTF-8 安全折行', testBuildIcsCalendarUsesUtcEscapingAndFolding],
+  ['ICS UID 不受額度陣列順序影響', testBuildIcsCalendarUidIsStableAcrossCreditOrdering],
+  ['ICS UID 使用額度固有時間且維持格式', testBuildIcsCalendarUidUsesIntrinsicCreditTimes],
   ['ICS 輸出路徑拒絕錯誤副檔名與覆寫', testResolveIcsOutputPathAndExclusiveWrite],
   ['ICS 互動選單支援複選', testInteractiveCreditSelectionSupportsMultipleChoices],
   ['ICS 互動選單要求選取或取消', testInteractiveCreditSelectionRequiresChoiceOrCancels],
