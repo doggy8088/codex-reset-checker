@@ -8,6 +8,7 @@ const os = require('os');
 const path = require('path');
 
 const checker = require('../bin/codex-reset-checker.js');
+const ics = require('../lib/ics.js');
 
 function createFakeHttps(responses) {
   const calls = [];
@@ -270,11 +271,15 @@ async function testWatchCliOptions() {
     authPath: '/tmp/auth.json',
     json: false,
     watch: true,
+    ics: false,
+    outputPath: null,
   });
   assert.deepStrictEqual(shortOption, {
     authPath: '/tmp/short-auth.json',
     json: false,
     watch: true,
+    ics: false,
+    outputPath: null,
   });
   assert.strictEqual(equalsOption.authPath, '/tmp/equals-auth.json');
   assert.throws(
@@ -289,6 +294,469 @@ async function testWatchCliOptions() {
     () => checker.getCliOptions(['/tmp/one.json', '/tmp/two.json']),
     /只能指定一個 auth\.json 路徑/
   );
+}
+
+async function testIcsCliOptionsAndConflicts() {
+  const options = checker.getCliOptions([
+    '--ics',
+    '--output',
+    './calendar/codex.ics',
+    '--auth',
+    '/tmp/auth.json',
+  ]);
+  const equalsOptions = checker.getCliOptions([
+    '--ics',
+    '--output=./calendar/equals.ics',
+    '/tmp/equals-auth.json',
+  ]);
+
+  assert.deepStrictEqual(options, {
+    authPath: '/tmp/auth.json',
+    json: false,
+    watch: false,
+    ics: true,
+    outputPath: './calendar/codex.ics',
+  });
+  assert.strictEqual(equalsOptions.outputPath, './calendar/equals.ics');
+  assert.throws(
+    () => checker.getCliOptions(['--ics', '--json']),
+    /--ics 不能與 --json 同時使用/
+  );
+  assert.throws(
+    () => checker.getCliOptions(['--ics', '--watch']),
+    /--ics 不能與 --watch 同時使用/
+  );
+  assert.throws(
+    () => checker.getCliOptions(['--output', './codex.ics']),
+    /--output 必須搭配 --ics 使用/
+  );
+  assert.throws(
+    () => checker.getCliOptions(['--ics', '--output']),
+    /--output 需要指定/
+  );
+}
+
+async function testIcsHelpersAreExportedFromSharedModule() {
+  const helperNames = [
+    'buildIcsCalendar',
+    'escapeIcsText',
+    'exportCreditsToIcs',
+    'foldIcsLine',
+    'formatIcsDateTime',
+    'getEligibleCredits',
+    'getOpenFolderCommand',
+    'openFolder',
+    'resolveIcsOutputPath',
+    'selectCreditsInteractively',
+    'writeIcsFile',
+  ];
+
+  helperNames.forEach((name) => {
+    assert.strictEqual(typeof ics[name], 'function', `lib/ics.js 應匯出 ${name}`);
+    assert.strictEqual(checker[name], undefined, `bin 不應再匯出 ${name}`);
+  });
+}
+
+async function testEligibleCreditsRequireActiveFutureExpiry() {
+  const now = new Date('2026-07-16T00:00:00Z');
+  const credits = [
+    {
+      status: 'active',
+      granted_at: '2026-07-10T00:00:00Z',
+      expires_at: '2026-07-20T12:30:00Z',
+    },
+    {
+      status: 'AVAILABLE',
+      granted_at: '2026-07-11T00:00:00Z',
+      expires_at: '2026-07-21T09:00:00Z',
+    },
+    {
+      status: 'used',
+      expires_at: '2026-07-22T00:00:00Z',
+    },
+    {
+      status: 'active',
+      expires_at: '2026-07-15T00:00:00Z',
+    },
+    {
+      status: 'active',
+      expires_at: 'not-a-date',
+    },
+  ];
+
+  const eligible = ics.getEligibleCredits(credits, now);
+
+  assert.deepStrictEqual(eligible.map((entry) => entry.originalIndex), [0, 1]);
+  assert.strictEqual(eligible[0].expiresAt.toISOString(), '2026-07-20T12:30:00.000Z');
+  assert.strictEqual(eligible[0].eventAt.toISOString(), '2026-07-17T12:30:00.000Z');
+  assert.strictEqual(eligible[1].eventAt.toISOString(), '2026-07-18T09:00:00.000Z');
+}
+
+async function testBuildIcsCalendarUsesUtcEscapingAndFolding() {
+  const entries = [
+    {
+      originalIndex: 0,
+      expiresAt: new Date('2026-07-20T12:30:00Z'),
+      eventAt: new Date('2026-07-17T12:30:00Z'),
+      credit: {
+        status: 'active,ready',
+        granted_at: '2026-07-10T00:00:00Z;token-secret',
+        expires_at: '2026-07-20T12:30:00Z',
+      },
+    },
+    {
+      originalIndex: 1,
+      expiresAt: new Date('2026-07-22T09:15:00Z'),
+      eventAt: new Date('2026-07-19T09:15:00Z'),
+      credit: {
+        status: 'available',
+        granted_at: '這是一段很長的中文內容，用來確認 UTF-8 多位元字元不會在折行時被截斷。',
+        expires_at: '2026-07-22T09:15:00Z',
+      },
+    },
+  ];
+
+  const calendar = ics.buildIcsCalendar(entries, {
+    generatedAt: new Date('2026-07-16T03:04:05Z'),
+    sensitiveValues: ['token-secret'],
+  });
+  const unfolded = calendar.replace(/\r\n[ \t]/g, '');
+  const physicalLines = calendar.split('\r\n').filter(Boolean);
+
+  assert.strictEqual((calendar.match(/BEGIN:VEVENT/g) || []).length, 2);
+  assert.ok(calendar.includes('DTSTAMP:20260716T030405Z'));
+  assert.ok(calendar.includes('DTSTART:20260717T123000Z'));
+  assert.ok(calendar.includes('DTEND:20260720T123000Z'));
+  assert.ok(unfolded.includes('狀態: active\\,ready'));
+  assert.ok(unfolded.includes('產生時間: 2026-07-10T00:00:00Z\\;[已隱藏]'));
+  assert.ok(!calendar.includes('token-secret'));
+  assert.ok(!calendar.replace(/\r\n/g, '').includes('\n'));
+  assert.ok(physicalLines.every((line) => Buffer.byteLength(line, 'utf8') <= 75));
+  assert.ok(calendar.endsWith('\r\n'));
+}
+
+async function testBuildIcsCalendarUidIsStableAcrossCreditOrdering() {
+  const entry = {
+    originalIndex: 0,
+    expiresAt: new Date('2026-07-20T12:30:00Z'),
+    eventAt: new Date('2026-07-17T12:30:00Z'),
+    credit: {
+      status: 'active',
+      granted_at: '2026-07-10T00:00:00Z',
+      expires_at: '2026-07-20T12:30:00Z',
+    },
+  };
+  const reorderedEntry = {
+    ...entry,
+    originalIndex: 7,
+  };
+  const firstCalendar = ics.buildIcsCalendar([entry]);
+  const reorderedCalendar = ics.buildIcsCalendar([reorderedEntry]);
+  const uidPattern = /UID:([a-f0-9]{24}@codex-reset-checker)/;
+  const firstUid = firstCalendar.match(uidPattern);
+  const reorderedUid = reorderedCalendar.match(uidPattern);
+
+  assert.ok(firstUid);
+  assert.ok(reorderedUid);
+  assert.strictEqual(firstUid[1], reorderedUid[1]);
+}
+
+async function testBuildIcsCalendarUidUsesIntrinsicCreditTimes() {
+  const entries = [
+    {
+      originalIndex: 0,
+      expiresAt: new Date('2026-07-20T12:30:00Z'),
+      eventAt: new Date('2026-07-17T12:30:00Z'),
+      credit: {
+        status: 'active',
+        granted_at: '2026-07-10T00:00:00Z',
+        expires_at: '2026-07-20T12:30:00Z',
+      },
+    },
+    {
+      originalIndex: 0,
+      expiresAt: new Date('2026-07-20T12:30:00Z'),
+      eventAt: new Date('2026-07-17T12:30:00Z'),
+      credit: {
+        status: 'active',
+        granted_at: '2026-07-11T00:00:00Z',
+        expires_at: '2026-07-20T12:30:00Z',
+      },
+    },
+    {
+      originalIndex: 0,
+      expiresAt: new Date('2026-07-21T12:30:00Z'),
+      eventAt: new Date('2026-07-18T12:30:00Z'),
+      credit: {
+        status: 'active',
+        granted_at: '2026-07-10T00:00:00Z',
+        expires_at: '2026-07-21T12:30:00Z',
+      },
+    },
+  ];
+  const calendar = ics.buildIcsCalendar(entries);
+  const uidLines = calendar.match(/UID:[a-f0-9]{24}@codex-reset-checker/g) || [];
+  const uids = uidLines.map((line) => line.slice('UID:'.length));
+
+  assert.strictEqual(uids.length, 3);
+  assert.strictEqual(new Set(uids).size, 3);
+  uids.forEach((uid) => {
+    assert.match(uid, /^[a-f0-9]{24}@codex-reset-checker$/);
+  });
+}
+
+async function testResolveIcsOutputPathAndExclusiveWrite() {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-reset-ics-'));
+  const generated = ics.resolveIcsOutputPath(null, {
+    cwd: directory,
+    now: new Date('2026-07-16T03:04:05Z'),
+  });
+  const custom = ics.resolveIcsOutputPath('./custom.ics', {
+    cwd: directory,
+    now: new Date('2026-07-16T03:04:05Z'),
+  });
+
+  try {
+    assert.strictEqual(path.dirname(generated), directory);
+    assert.match(path.basename(generated), /^codex-reset-credits-\d{8}-\d{6}\.ics$/);
+    assert.strictEqual(custom, path.join(directory, 'custom.ics'));
+    assert.throws(
+      () => ics.resolveIcsOutputPath('./custom.txt', { cwd: directory }),
+      /必須使用 \.ics 副檔名/
+    );
+    assert.throws(
+      () => ics.resolveIcsOutputPath('./missing/custom.ics', { cwd: directory }),
+      /輸出資料夾不存在/
+    );
+
+    await ics.writeIcsFile(custom, 'BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n');
+    await assert.rejects(
+      ics.writeIcsFile(custom, 'replacement'),
+      /輸出檔案已存在，未覆寫/
+    );
+  } finally {
+    if (fs.existsSync(custom)) {
+      fs.unlinkSync(custom);
+    }
+    fs.rmdirSync(directory);
+  }
+}
+
+function createInteractiveTerminal() {
+  const input = new EventEmitter();
+  const output = new EventEmitter();
+  const writes = [];
+  const rawModeChanges = [];
+  let paused = false;
+
+  input.isTTY = true;
+  input.isRaw = false;
+  input.readableFlowing = false;
+  input.setRawMode = (value) => {
+    input.isRaw = value;
+    rawModeChanges.push(value);
+  };
+  input.resume = () => {
+    input.readableFlowing = true;
+  };
+  input.pause = () => {
+    input.readableFlowing = false;
+    paused = true;
+  };
+  output.isTTY = true;
+  output.write = (value) => writes.push(String(value));
+
+  return {
+    input,
+    output,
+    writes,
+    rawModeChanges,
+    wasPaused: () => paused,
+  };
+}
+
+async function testInteractiveCreditSelectionSupportsMultipleChoices() {
+  const terminal = createInteractiveTerminal();
+  const entries = ics.getEligibleCredits([
+    { status: 'active', expires_at: '2026-07-20T00:00:00Z' },
+    { status: 'available', expires_at: '2026-07-21T00:00:00Z' },
+  ], new Date('2026-07-16T00:00:00Z'));
+  const selection = ics.selectCreditsInteractively(entries, terminal);
+
+  terminal.input.emit('data', Buffer.from(' '));
+  terminal.input.emit('data', Buffer.from('\u001b[B'));
+  terminal.input.emit('data', Buffer.from(' '));
+  terminal.input.emit('data', Buffer.from('\r'));
+
+  const selected = await selection;
+  assert.deepStrictEqual(selected.map((entry) => entry.originalIndex), [0, 1]);
+  assert.deepStrictEqual(terminal.rawModeChanges, [true, false]);
+  assert.strictEqual(terminal.input.listenerCount('data'), 0);
+  assert.strictEqual(terminal.wasPaused(), true);
+  assert.ok(terminal.writes.some((value) => value.includes('[x] #001')));
+  assert.ok(terminal.writes.some((value) =>
+    /到期時間 .+  行事曆提醒時間 .+/.test(value)
+  ));
+  assert.ok(terminal.writes[terminal.writes.length - 1].includes('\x1b[?25h'));
+}
+
+async function testInteractiveCreditSelectionRequiresChoiceOrCancels() {
+  const terminal = createInteractiveTerminal();
+  const entries = ics.getEligibleCredits([
+    { status: 'active', expires_at: '2026-07-20T00:00:00Z' },
+  ], new Date('2026-07-16T00:00:00Z'));
+  const selection = ics.selectCreditsInteractively(entries, terminal);
+
+  terminal.input.emit('data', Buffer.from('\r'));
+  assert.ok(terminal.writes.some((value) => value.includes('請至少選取一筆額度')));
+  terminal.input.emit('data', Buffer.from('q'));
+
+  assert.strictEqual(await selection, null);
+  assert.throws(
+    () => ics.selectCreditsInteractively(entries, {
+      input: { isTTY: false },
+      output: { isTTY: false },
+    }),
+    /需要互動式終端機/
+  );
+}
+
+async function testOpenFolderUsesPlatformCommands() {
+  const calls = [];
+  const execFileFunction = (command, args, options, callback) => {
+    calls.push({ command, args, options });
+    callback(null);
+  };
+
+  await ics.openFolder('/tmp/calendar', {
+    platform: 'darwin',
+    execFileFunction,
+  });
+  await ics.openFolder('C:\\calendar', {
+    platform: 'win32',
+    execFileFunction,
+  });
+  await ics.openFolder('/tmp/linux-calendar', {
+    platform: 'linux',
+    execFileFunction,
+  });
+
+  assert.deepStrictEqual(calls.map((call) => call.command), [
+    'open',
+    'explorer.exe',
+    'xdg-open',
+  ]);
+  assert.deepStrictEqual(calls[0].args, ['/tmp/calendar']);
+  assert.strictEqual(calls[0].options.windowsHide, true);
+}
+
+async function testExportCreditsWritesOneCalendarAndWarnsWhenFolderCannotOpen() {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-reset-export-'));
+  const outputPath = path.join(directory, 'selected.ics');
+  const logs = [];
+  const warnings = [];
+  const openedFolders = [];
+  const credits = [
+    {
+      status: 'active',
+      granted_at: '2026-07-10T00:00:00Z',
+      expires_at: '2026-07-20T12:30:00Z',
+    },
+    {
+      status: 'available',
+      granted_at: 'account-secret',
+      expires_at: '2026-07-22T09:15:00Z',
+    },
+  ];
+
+  try {
+    const result = await ics.exportCreditsToIcs(credits, {
+      outputPath,
+      sensitiveValues: ['account-secret'],
+    }, {
+      cwd: directory,
+      nowFunction: () => new Date('2026-07-16T03:04:05Z'),
+      selectCreditsFunction: async (eligible) => [eligible[1]],
+      openFolderFunction: async (folderPath) => {
+        openedFolders.push(folderPath);
+        throw new Error('no desktop session');
+      },
+      logFunction: (value) => logs.push(String(value)),
+      warnFunction: (value) => warnings.push(String(value)),
+    });
+    const content = fs.readFileSync(outputPath, 'utf8');
+
+    assert.deepStrictEqual(result, {
+      filePath: outputPath,
+      selectedCount: 1,
+    });
+    assert.ok(content.includes('SUMMARY:Codex 手動重置額度 #002'));
+    assert.ok(content.includes('DTSTART:20260719T091500Z'));
+    assert.ok(content.includes('DTEND:20260722T091500Z'));
+    assert.ok(content.includes('[已隱藏]'));
+    assert.ok(!content.includes('account-secret'));
+    assert.deepStrictEqual(openedFolders, [directory]);
+    assert.ok(logs.some((line) => line.includes(outputPath)));
+    assert.ok(warnings.some((line) => line.includes('無法自動開啟輸出資料夾')));
+  } finally {
+    if (fs.existsSync(outputPath)) {
+      fs.unlinkSync(outputPath);
+    }
+    fs.rmdirSync(directory);
+  }
+}
+
+async function testRunOnceIcsModeExportsFetchedCredits() {
+  const auth = createAuthFile();
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-reset-run-ics-'));
+  const outputPath = path.join(directory, 'run-once.ics');
+  const originalLog = console.log;
+  const logs = [];
+  const openedFolders = [];
+  console.log = (value = '') => logs.push(String(value));
+
+  try {
+    await withFakeHttps({
+      '/backend-api/wham/rate-limit-reset-credits': {
+        body: {
+          available_count: 1,
+          credits: [
+            {
+              status: 'active',
+              granted_at: '2026-07-10T00:00:00Z',
+              expires_at: '2026-07-20T12:30:00Z',
+            },
+          ],
+        },
+      },
+      '/backend-api/wham/usage': { body: usageResponse() },
+      '/backend-api/accounts/check/v4-2023-04-27': { body: {} },
+    }, async () => checker.runOnce({
+      authPath: auth.authPath,
+      json: false,
+      watch: false,
+      ics: true,
+      outputPath,
+    }, {
+      nowFunction: () => new Date('2026-07-16T03:04:05Z'),
+      selectCreditsFunction: async (eligible) => eligible,
+      openFolderFunction: async (folderPath) => openedFolders.push(folderPath),
+      logFunction: (value) => logs.push(String(value)),
+    }));
+
+    const content = fs.readFileSync(outputPath, 'utf8');
+    assert.ok(content.includes('DTSTART:20260717T123000Z'));
+    assert.ok(content.includes('DTEND:20260720T123000Z'));
+    assert.deepStrictEqual(openedFolders, [directory]);
+    assert.ok(logs.some((line) => line.includes('已產生 iCalendar 檔案')));
+  } finally {
+    console.log = originalLog;
+    if (fs.existsSync(outputPath)) {
+      fs.unlinkSync(outputPath);
+    }
+    fs.rmdirSync(directory);
+    auth.cleanup();
+  }
 }
 
 async function testWatchRefreshesOnIntervalAndTerminalResize() {
@@ -809,6 +1277,18 @@ const tests = [
   ['缺少或 null 欄位不會讓解析失敗', testNormalizeMissingAndNullWindowFields],
   ['使用額度寬度受手動重置額度限制', testUsageLayoutUsesManualResetWidthCap],
   ['watch CLI 長短選項皆可解析', testWatchCliOptions],
+  ['ICS CLI 選項與衝突規則可解析', testIcsCliOptionsAndConflicts],
+  ['ICS helper 由共用模組匯出', testIcsHelpersAreExportedFromSharedModule],
+  ['ICS 只匯出有效且未到期額度', testEligibleCreditsRequireActiveFutureExpiry],
+  ['ICS 使用 UTC、跳脫與 UTF-8 安全折行', testBuildIcsCalendarUsesUtcEscapingAndFolding],
+  ['ICS UID 不受額度陣列順序影響', testBuildIcsCalendarUidIsStableAcrossCreditOrdering],
+  ['ICS UID 使用額度固有時間且維持格式', testBuildIcsCalendarUidUsesIntrinsicCreditTimes],
+  ['ICS 輸出路徑拒絕錯誤副檔名與覆寫', testResolveIcsOutputPathAndExclusiveWrite],
+  ['ICS 互動選單支援複選', testInteractiveCreditSelectionSupportsMultipleChoices],
+  ['ICS 互動選單要求選取或取消', testInteractiveCreditSelectionRequiresChoiceOrCancels],
+  ['ICS 依平台選擇資料夾開啟命令', testOpenFolderUsesPlatformCommands],
+  ['ICS 匯出單一行事曆並處理開啟失敗', testExportCreditsWritesOneCalendarAndWarnsWhenFolderCannotOpen],
+  ['ICS 模式會匯出查詢取得的額度', testRunOnceIcsModeExportsFetchedCredits],
   ['watch 每分鐘與終端機尺寸變更時刷新', testWatchRefreshesOnIntervalAndTerminalResize],
   ['watch 刷新不會重疊輸出', testWatchQueuesRefreshWithoutOverlappingOutput],
   ['watch 單次刷新失敗後仍會繼續', testWatchContinuesAfterRefreshFailure],

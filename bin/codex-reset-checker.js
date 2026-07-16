@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const https = require('https');
+const { exportCreditsToIcs } = require('../lib/ics.js');
 
 const RATE_LIMIT_API_URL = 'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits';
 const USAGE_API_URL = 'https://chatgpt.com/backend-api/wham/usage';
@@ -62,6 +63,8 @@ function printUsage() {
 選項：
   --auth <path>   指定 auth.json 路徑（未提供則依作業系統自動判斷）
   --json          以單行 JSON 輸出查詢結果與標準化使用額度
+  --ics           複選有效的手動重置額度並匯出 iCalendar 檔
+  --output <path> 指定 .ics 完整輸出路徑（必須搭配 --ics）
   -w, --watch     持續監看；Spacebar 刷新，q 結束
   -h, --help      顯示說明`);
 }
@@ -70,6 +73,8 @@ function getCliOptions(cliArgs) {
   let authPath = null;
   let json = false;
   let watch = false;
+  let ics = false;
+  let outputPath = null;
 
   for (let i = 0; i < cliArgs.length; i++) {
     const arg = cliArgs[i];
@@ -86,6 +91,40 @@ function getCliOptions(cliArgs) {
 
     if (arg === '--watch' || arg === '-w') {
       watch = true;
+      continue;
+    }
+
+    if (arg === '--ics') {
+      ics = true;
+      continue;
+    }
+
+    if (arg === '--output') {
+      const value = cliArgs[i + 1];
+      if (!value || value.startsWith('-')) {
+        throw new Error('--output 需要指定 .ics 完整輸出路徑');
+      }
+
+      if (outputPath) {
+        throw new Error('--output 只能指定一次');
+      }
+
+      outputPath = value;
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--output=')) {
+      const value = arg.slice('--output='.length);
+      if (!value) {
+        throw new Error('--output 需要指定 .ics 完整輸出路徑');
+      }
+
+      if (outputPath) {
+        throw new Error('--output 只能指定一次');
+      }
+
+      outputPath = value;
       continue;
     }
 
@@ -130,18 +169,32 @@ function getCliOptions(cliArgs) {
     throw new Error(`未知選項：${arg}`);
   }
 
-  if (authPath) {
-    return { authPath, json, watch };
+  if (ics && json) {
+    throw new Error('--ics 不能與 --json 同時使用');
   }
 
-  const home = process.platform === 'win32'
-    ? process.env.USERPROFILE || os.homedir()
-    : os.homedir();
+  if (ics && watch) {
+    throw new Error('--ics 不能與 --watch 同時使用');
+  }
+
+  if (outputPath && !ics) {
+    throw new Error('--output 必須搭配 --ics 使用');
+  }
+
+  let resolvedAuthPath = authPath;
+  if (!resolvedAuthPath) {
+    const home = process.platform === 'win32'
+      ? process.env.USERPROFILE || os.homedir()
+      : os.homedir();
+    resolvedAuthPath = path.join(home, '.codex', 'auth.json');
+  }
 
   return {
-    authPath: path.join(home, '.codex', 'auth.json'),
+    authPath: resolvedAuthPath,
     json,
     watch,
+    ics,
+    outputPath,
   };
 }
 
@@ -1373,7 +1426,23 @@ function printCredits(credits, layout = getManualResetLayout(credits)) {
   printCreditCardsInSingleColumn(layout.cards);
 }
 
-async function runOnce(options) {
+function getCreditsFromResult(result) {
+  if (Array.isArray(result.credits)) {
+    return result.credits;
+  }
+
+  if (Array.isArray(result.items)) {
+    return result.items;
+  }
+
+  if (Array.isArray(result.data)) {
+    return result.data;
+  }
+
+  return [];
+}
+
+async function runOnce(options, dependencies = {}) {
   const authPath = options.authPath;
   const auth = loadAuth(authPath);
 
@@ -1460,13 +1529,7 @@ async function runOnce(options) {
     return;
   }
 
-  const credits = Array.isArray(result.credits)
-    ? result.credits
-    : Array.isArray(result.items)
-      ? result.items
-      : Array.isArray(result.data)
-        ? result.data
-        : [];
+  const credits = getCreditsFromResult(result);
 
   const manualResetLayout = getManualResetLayout(credits);
   const usageCards = getUsageCards(usage);
@@ -1483,6 +1546,13 @@ async function runOnce(options) {
   printUsageSection(usage, usageLayout);
   console.log('');
   printManualResetSection(credits, manualResetLayout);
+  if (options.ics) {
+    console.log('');
+    await exportCreditsToIcs(credits, {
+      outputPath: options.outputPath,
+      sensitiveValues: [accessToken, accountId],
+    }, dependencies);
+  }
   if (options.watch) {
     console.log('');
     const countdownSeconds = typeof options.getWatchCountdownSeconds === 'function'
