@@ -307,6 +307,7 @@ async function testWatchCliOptions() {
     watch: true,
     reset: false,
     resetRequestId: null,
+    force: false,
   });
   assert.deepStrictEqual(shortOption, {
     authPath: '/tmp/short-auth.json',
@@ -314,6 +315,7 @@ async function testWatchCliOptions() {
     watch: true,
     reset: false,
     resetRequestId: null,
+    force: false,
   });
   assert.strictEqual(equalsOption.authPath, '/tmp/equals-auth.json');
   assert.throws(
@@ -337,6 +339,17 @@ async function testResetCliOptions() {
     `--reset=${requestId.toUpperCase()}`,
     '/tmp/retry-auth.json',
   ]);
+  const forceOption = checker.getCliOptions([
+    '--reset',
+    '--force',
+    '--auth',
+    '/tmp/force-auth.json',
+  ]);
+  const forceRetryOption = checker.getCliOptions([
+    `--reset=${requestId}`,
+    '--force',
+    '/tmp/force-retry-auth.json',
+  ]);
 
   assert.deepStrictEqual(resetOption, {
     authPath: '/tmp/auth.json',
@@ -344,6 +357,7 @@ async function testResetCliOptions() {
     watch: false,
     reset: true,
     resetRequestId: null,
+    force: false,
   });
   assert.deepStrictEqual(retryOption, {
     authPath: '/tmp/retry-auth.json',
@@ -351,6 +365,23 @@ async function testResetCliOptions() {
     watch: false,
     reset: true,
     resetRequestId: requestId,
+    force: false,
+  });
+  assert.deepStrictEqual(forceOption, {
+    authPath: '/tmp/force-auth.json',
+    json: false,
+    watch: false,
+    reset: true,
+    resetRequestId: null,
+    force: true,
+  });
+  assert.deepStrictEqual(forceRetryOption, {
+    authPath: '/tmp/force-retry-auth.json',
+    json: false,
+    watch: false,
+    reset: true,
+    resetRequestId: requestId,
+    force: true,
   });
   assert.throws(
     () => checker.getCliOptions(['--reset', '--json']),
@@ -367,6 +398,14 @@ async function testResetCliOptions() {
   assert.throws(
     () => checker.getCliOptions(['--reset', '--reset']),
     /--reset 只能指定一次/
+  );
+  assert.throws(
+    () => checker.getCliOptions(['--force']),
+    /--force 只能與 --reset 一起使用/
+  );
+  assert.throws(
+    () => checker.getCliOptions(['--reset', '--force', '--force']),
+    /--force 只能指定一次/
   );
 }
 
@@ -785,6 +824,7 @@ async function testResetCancellationDoesNotPost() {
           watch: false,
           reset: true,
           resetRequestId: null,
+          force: false,
         },
         {
           confirmationFunction: async () => false,
@@ -808,6 +848,66 @@ async function testResetCancellationDoesNotPost() {
   }
 }
 
+async function testForceResetSkipsConfirmationAndPosts() {
+  const auth = createAuthFile();
+  const requestId = '8ae96ff3-3425-4f4c-8772-b6fd61502868';
+  let confirmationCalled = false;
+
+  try {
+    const captured = await captureConsole(() => withFakeHttps({
+      '/backend-api/wham/rate-limit-reset-credits': [
+        { body: { available_count: 2, credits: [] } },
+        { body: { available_count: 1, credits: [] } },
+      ],
+      '/backend-api/wham/usage': [
+        { body: usageResponse() },
+        { body: usageResponse() },
+      ],
+      '/backend-api/wham/rate-limit-reset-credits/consume': {
+        body: {
+          code: 'reset',
+          windows_reset: 1,
+        },
+      },
+      '/backend-api/accounts/check/v4-2023-04-27': {
+        body: {},
+      },
+    }, async (calls) => {
+      const result = await checker.runReset(
+        {
+          authPath: auth.authPath,
+          json: false,
+          watch: false,
+          reset: true,
+          resetRequestId: requestId,
+          force: true,
+        },
+        {
+          confirmationFunction: async () => {
+            confirmationCalled = true;
+            return false;
+          },
+        }
+      );
+      return {
+        calls,
+        result,
+      };
+    }));
+
+    assert.strictEqual(confirmationCalled, false);
+    assert.strictEqual(captured.result.result.outcome, 'reset');
+    assert.ok(
+      captured.result.calls.some(
+        (call) => call.path === '/backend-api/wham/rate-limit-reset-credits/consume'
+      )
+    );
+    assert.ok(captured.stdout.some((line) => line.includes('略過互動確認')));
+  } finally {
+    auth.cleanup();
+  }
+}
+
 async function testResetRequiresCreditsAndInteractiveConfirmation() {
   const auth = createAuthFile();
   let confirmationCalled = false;
@@ -821,6 +921,7 @@ async function testResetRequiresCreditsAndInteractiveConfirmation() {
           watch: false,
           reset: true,
           resetRequestId: null,
+          force: true,
         },
         {
           requestRateLimitFunction: async () => ({ available_count: 0 }),
@@ -1306,7 +1407,8 @@ const tests = [
   ['兩個端點共用標頭且路徑正確', testRequestsReuseHeadersAndEndpoints],
   ['reset 成功時以 POST 傳送 UUID 並重新查詢', testResetSuccessPostsUuidAndRefetchesUsage],
   ['reset 取消時不會送出 POST', testResetCancellationDoesNotPost],
-  ['reset 需要可用額度與互動式確認', testResetRequiresCreditsAndInteractiveConfirmation],
+  ['reset --force 會略過確認並直接送出 POST', testForceResetSkipsConfirmationAndPosts],
+  ['reset 與 --force 都需要可用額度，互動模式需要 TTY', testResetRequiresCreditsAndInteractiveConfirmation],
   ['reset 結果不明時保留原 UUID 且不自動重試', testUncertainResetFailurePreservesRequestId],
   ['reset eligibility 失敗不會誤導為結果不明', testResetEligibilityFailureDoesNotSuggestUncertainRetry],
   ['reset 無可重置視窗或額度時不顯示成功', testResetNoOpOutcomesDoNotRenderSuccess],

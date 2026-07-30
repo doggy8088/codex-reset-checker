@@ -9,7 +9,7 @@
 - `使用額度`：目前工作階段、每週視窗，以及 API 有提供時的模型專用額度之已使用比例、剩餘比例及重置倒數。
 - `手動重置額度`：可用次數，以及每筆額度的取得時間、到期時間與剩餘時間。
 
-預設流程只做查詢，不會修改本機檔案，也不會輸出 `access_token` 或 `account_id`。只有明確使用 `--reset` 並完成互動確認時，工具才會要求後端消耗一筆手動重置額度。
+預設流程只做查詢，不會修改本機檔案，也不會輸出 `access_token` 或 `account_id`。只有明確使用 `--reset` 並完成互動確認，或另外指定 `--force` 略過確認時，工具才會要求後端消耗一筆手動重置額度。
 
 快速開始：
 
@@ -99,9 +99,19 @@ codex-reset-checker --auth /path/to/auth.json --json
 ```bash
 codex-reset-checker --reset
 codex-reset-checker --auth /path/to/auth.json --reset
+codex-reset-checker --reset --force
 ```
 
-`--reset` 會先查詢可用額度與目前用量，只有在互動式終端機中完整輸入 `確認重置用量` 後，才會送出重置請求。此操作可能消耗一筆不可復原的手動重置額度，因此不可與 `--json` 或 `--watch` 同時使用，也不提供略過確認的選項。
+`--reset` 會先查詢可用額度與目前用量，預設只有在互動式終端機中完整輸入 `確認重置用量` 後，才會送出重置請求。此操作可能消耗一筆不可復原的手動重置額度，因此不可與 `--json` 或 `--watch` 同時使用。
+
+若已確認要略過文字確認，可明確加上 `--force`：
+
+```bash
+npx @willh/codex-reset-checker --reset --force
+codex-reset-checker --auth /path/to/auth.json --reset --force
+```
+
+`--force` 只能與 `--reset` 或 `--reset=<uuid>` 搭配。它會保留可用額度預檢、冪等 UUID、錯誤分類與重置後重新查詢，但不要求互動式終端機，也不會顯示文字確認提示，適合已自行承擔額度消耗風險的自動化流程。
 
 每次新的重置操作都會建立 UUID 冪等鍵。如果 POST 請求逾時、連線中斷或收到 5xx，結果可能不明；工具會顯示同一個 UUID，必須使用以下格式重試同一次操作，避免以新 UUID 重複消耗：
 
@@ -130,6 +140,7 @@ node ./bin/codex-reset-checker.js
 node ./bin/codex-reset-checker.js --auth /path/to/auth.json
 node ./bin/codex-reset-checker.js --json
 node ./bin/codex-reset-checker.js --reset
+node ./bin/codex-reset-checker.js --reset --force
 ```
 
 ### 從 npm 一次性執行
@@ -313,6 +324,7 @@ JSON 輸出範例：
 - `錯誤：請求 API 失敗，HTTP 403 Forbidden...`
 - `錯誤：後端回報目前沒有符合重置資格的用量視窗；未使用手動重置額度`
 - `錯誤：...重置結果不明，請勿產生新的 UUID；確認後請使用 --reset=<uuid> 重試同一次操作。`
+- `錯誤：--force 只能與 --reset 一起使用`
 - `警告：使用額度查詢失敗，仍顯示手動重置額度。...`
 - `警告：重置已獲後端接受，但重新查詢後未觀察到用量下降...`
 
@@ -378,7 +390,7 @@ CI 會在 `main` 的 push 與所有 pull request 上，使用 Node.js 14、18、
 - 不輸出 `access_token` 或 `account_id`
 - 只讀取本機 `auth.json`
 - 無資料持久化、無快取、無遙測
-- 預設查詢保持唯讀；只有 `--reset` 加上明確互動確認才會要求後端消耗一筆額度
+- 預設查詢保持唯讀；只有 `--reset` 加上明確互動確認，或 `--reset --force` 明確略過確認時，才會要求後端消耗一筆額度
 - 結果不明時保留並顯示冪等 UUID，不會以新的 UUID 自動重試
 
 `/wham/usage` 與 `/wham/rate-limit-reset-credits/*` 並非 OpenAI 公開 API，回應格式、權限與可用性可能變更。這項功能顯示及使用的是 Codex 手動重置額度，不宣稱為可購買 Credits 的餘額。OpenAI 官方目前說明可在 ChatGPT 的 Codex Settings > Usage Dashboard 查看 Credits 餘額，未提供本工具可依賴的公開 Access Token API：[Using Credits for Flexible Usage in ChatGPT](https://help.openai.com/en/articles/12642688-using-credits-for-flexible-usage-in-chatgpt-plus-pro)。

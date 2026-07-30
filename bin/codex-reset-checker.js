@@ -68,6 +68,7 @@ function printUsage() {
   --json          以單行 JSON 輸出查詢結果與標準化使用額度
   --reset         經確認後使用一筆手動重置額度
   --reset=<uuid>  以相同冪等鍵重試結果不明的重置操作
+  --force         與 --reset 搭配，略過互動確認直接重置
   -w, --watch     持續監看；Spacebar 刷新，q 結束
   -h, --help      顯示說明`);
 }
@@ -78,6 +79,7 @@ function getCliOptions(cliArgs) {
   let watch = false;
   let reset = false;
   let resetRequestId = null;
+  let force = false;
 
   for (let i = 0; i < cliArgs.length; i++) {
     const arg = cliArgs[i];
@@ -122,6 +124,15 @@ function getCliOptions(cliArgs) {
 
       reset = true;
       resetRequestId = value.toLowerCase();
+      continue;
+    }
+
+    if (arg === '--force') {
+      if (force) {
+        throw new Error('--force 只能指定一次');
+      }
+
+      force = true;
       continue;
     }
 
@@ -174,8 +185,12 @@ function getCliOptions(cliArgs) {
     throw new Error('--reset 不可與 --watch 同時使用');
   }
 
+  if (force && !reset) {
+    throw new Error('--force 只能與 --reset 一起使用');
+  }
+
   if (authPath) {
-    return { authPath, json, watch, reset, resetRequestId };
+    return { authPath, json, watch, reset, resetRequestId, force };
   }
 
   const home = process.platform === 'win32'
@@ -188,6 +203,7 @@ function getCliOptions(cliArgs) {
     watch,
     reset,
     resetRequestId,
+    force,
   };
 }
 
@@ -1714,12 +1730,16 @@ async function runReset(options, dependencies = {}) {
   }
 
   printResetPreview(availableCount, usage);
-  const confirmed = await confirmationFunction(availableCount);
-  if (!confirmed) {
-    console.log('已取消，未使用手動重置額度。');
-    return {
-      outcome: 'cancelled',
-    };
+  if (options.force) {
+    console.log('已指定 --force，略過互動確認並直接執行重置。');
+  } else {
+    const confirmed = await confirmationFunction(availableCount);
+    if (!confirmed) {
+      console.log('已取消，未使用手動重置額度。');
+      return {
+        outcome: 'cancelled',
+      };
+    }
   }
 
   const redeemRequestId = options.resetRequestId || createRequestIdFunction();
@@ -1774,6 +1794,7 @@ async function runReset(options, dependencies = {}) {
       ...options,
       reset: false,
       resetRequestId: null,
+      force: false,
     });
   } catch (error) {
     console.error(
