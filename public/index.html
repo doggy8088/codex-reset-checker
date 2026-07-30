@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="description" content="Codex Reset Checker 是一套唯讀、零依賴的跨平台 CLI 工具，快速查詢 Codex 使用額度、重置倒數與手動重置額度。">
+  <meta name="description" content="Codex Reset Checker 是一套零依賴的跨平台 CLI 工具，可查詢 Codex 使用額度、重置倒數，並在明確確認後使用手動重置額度。">
   <meta name="keywords" content="Codex, ChatGPT, CLI, 使用額度, rate limit, reset credits, 開發者工具">
   <meta name="author" content="Will 保哥">
   <meta name="application-name" content="Codex Reset Checker">
@@ -17,7 +17,7 @@
   <meta property="og:locale" content="zh_TW">
   <meta property="og:site_name" content="Codex Reset Checker">
   <meta property="og:title" content="Codex Reset Checker — 額度，不用猜。">
-  <meta property="og:description" content="一行指令，快速掌握 Codex 使用額度、重置倒數與手動重置額度。唯讀、零依賴、不洩漏憑證。">
+  <meta property="og:description" content="一行指令掌握 Codex 使用額度；需要時以互動確認安全使用手動重置額度。零依賴、不洩漏憑證。">
   <meta property="og:url" content="https://lemon-ground-0f66b9800.7.azurestaticapps.net/">
   <meta property="og:image" content="https://lemon-ground-0f66b9800.7.azurestaticapps.net/og-image.jpg">
   <meta property="og:image:secure_url" content="https://lemon-ground-0f66b9800.7.azurestaticapps.net/og-image.jpg">
@@ -28,7 +28,7 @@
 
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Codex Reset Checker — 額度，不用猜。">
-  <meta name="twitter:description" content="一行指令，快速掌握 Codex 使用額度與重置時間。唯讀、零依賴、不洩漏憑證。">
+  <meta name="twitter:description" content="快速掌握 Codex 使用額度，並以互動確認安全使用手動重置額度。零依賴、不洩漏憑證。">
   <meta name="twitter:image" content="https://lemon-ground-0f66b9800.7.azurestaticapps.net/og-image.jpg">
   <meta name="twitter:image:alt" content="Codex Reset Checker 產品頁與終端機額度查詢畫面">
 
@@ -42,7 +42,7 @@
           "@id": "https://lemon-ground-0f66b9800.7.azurestaticapps.net/#website",
           "url": "https://lemon-ground-0f66b9800.7.azurestaticapps.net/",
           "name": "Codex Reset Checker",
-          "description": "快速查詢 Codex 使用額度、重置倒數與手動重置額度的跨平台 CLI 工具。",
+          "description": "快速查詢 Codex 使用額度、重置倒數，並安全使用手動重置額度的跨平台 CLI 工具。",
           "inLanguage": "zh-Hant"
         },
         {
@@ -52,11 +52,11 @@
           "alternateName": "@willh/codex-reset-checker",
           "url": "https://lemon-ground-0f66b9800.7.azurestaticapps.net/",
           "image": "https://lemon-ground-0f66b9800.7.azurestaticapps.net/og-image.jpg",
-          "description": "唯讀、零依賴的 CLI 工具，用來查詢 Codex 使用額度、模型專用額度、重置倒數與手動重置額度。",
+          "description": "零依賴的 CLI 工具，用來查詢 Codex 使用額度、模型專用額度與重置倒數，並在明確確認後使用手動重置額度。",
           "applicationCategory": "DeveloperApplication",
           "applicationSubCategory": "Command-line utility",
           "operatingSystem": "macOS, Linux, Windows",
-          "softwareVersion": "0.6.1",
+          "softwareVersion": "0.7.0",
           "downloadUrl": "https://www.npmjs.com/package/@willh/codex-reset-checker",
           "codeRepository": "https://github.com/doggy8088/codex-reset-checker",
           "license": "https://opensource.org/license/mit",
@@ -76,6 +76,7 @@
             "查詢 Codex 使用額度與重置時間",
             "顯示模型專用額度",
             "顯示手動重置額度與到期時間",
+            "以互動確認安全使用一筆手動重置額度",
             "支援 JSON 輸出與持續監看",
             "不修改 auth.json 且不輸出敏感憑證"
           ]
@@ -1185,7 +1186,7 @@
               <path d="m8.5 12 2.2 2.2 4.8-5"></path>
             </svg>
           </span>
-          <div><strong>唯讀查詢</strong><span>不修改 auth.json，不保存資料</span></div>
+          <div><strong>安全預設</strong><span>查詢唯讀；重置需要明確確認</span></div>
         </li>
         <li class="trust-item">
           <span class="trust-icon" aria-hidden="true">
@@ -1286,8 +1287,8 @@
             <p><code>npx @willh/codex-reset-checker</code>，不需全域安裝。</p>
           </article>
           <article class="step">
-            <h3>需要時持續監看</h3>
-            <p>加上 <code>--watch</code> 每分鐘自動刷新；Spacebar 立即刷新，按 q 結束。</p>
+            <h3>監看或手動重置</h3>
+            <p>加上 <code>--watch</code> 持續刷新；需要重置時使用 <code>--reset</code> 並完成互動確認。</p>
           </article>
         </div>
       </div>
@@ -1296,7 +1297,7 @@
     <section class="final-cta" aria-labelledby="cta-title">
       <div class="container">
         <h2 id="cta-title">查一下。<br>心裡有底。</h2>
-        <p>一行指令，掌握剩餘額度與重置時間。簡單到不用寫另一份教學。</p>
+        <p>一行指令掌握剩餘額度；需要時再以明確確認使用一筆手動重置額度。</p>
         <div class="command final-command" aria-label="執行 Codex Reset Checker">
           <code>npx @willh/codex-reset-checker</code>
           <button class="copy-button" type="button" data-copy="npx @willh/codex-reset-checker">複製指令</button>

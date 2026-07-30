@@ -4,8 +4,12 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const https = require('https');
+const crypto = require('crypto');
+const readline = require('readline');
 
 const RATE_LIMIT_API_URL = 'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits';
+const RESET_CONSUME_API_URL =
+  'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume';
 const USAGE_API_URL = 'https://chatgpt.com/backend-api/wham/usage';
 
 const COLOR = process.stdout && process.stdout.isTTY && !process.env.NO_COLOR;
@@ -62,6 +66,8 @@ function printUsage() {
 選項：
   --auth <path>   指定 auth.json 路徑（未提供則依作業系統自動判斷）
   --json          以單行 JSON 輸出查詢結果與標準化使用額度
+  --reset         經確認後使用一筆手動重置額度
+  --reset=<uuid>  以相同冪等鍵重試結果不明的重置操作
   -w, --watch     持續監看；Spacebar 刷新，q 結束
   -h, --help      顯示說明`);
 }
@@ -70,6 +76,8 @@ function getCliOptions(cliArgs) {
   let authPath = null;
   let json = false;
   let watch = false;
+  let reset = false;
+  let resetRequestId = null;
 
   for (let i = 0; i < cliArgs.length; i++) {
     const arg = cliArgs[i];
@@ -86,6 +94,34 @@ function getCliOptions(cliArgs) {
 
     if (arg === '--watch' || arg === '-w') {
       watch = true;
+      continue;
+    }
+
+    if (arg === '--reset') {
+      if (reset) {
+        throw new Error('--reset 只能指定一次');
+      }
+
+      reset = true;
+      continue;
+    }
+
+    if (arg.startsWith('--reset=')) {
+      const value = arg.slice('--reset='.length);
+      if (!value) {
+        throw new Error('--reset 的冪等鍵不可為空');
+      }
+
+      if (reset) {
+        throw new Error('--reset 只能指定一次');
+      }
+
+      if (!isUuid(value)) {
+        throw new Error('--reset 的冪等鍵必須是有效的 UUID');
+      }
+
+      reset = true;
+      resetRequestId = value.toLowerCase();
       continue;
     }
 
@@ -130,8 +166,16 @@ function getCliOptions(cliArgs) {
     throw new Error(`未知選項：${arg}`);
   }
 
+  if (reset && json) {
+    throw new Error('--reset 不可與 --json 同時使用');
+  }
+
+  if (reset && watch) {
+    throw new Error('--reset 不可與 --watch 同時使用');
+  }
+
   if (authPath) {
-    return { authPath, json, watch };
+    return { authPath, json, watch, reset, resetRequestId };
   }
 
   const home = process.platform === 'win32'
@@ -142,7 +186,14 @@ function getCliOptions(cliArgs) {
     authPath: path.join(home, '.codex', 'auth.json'),
     json,
     watch,
+    reset,
+    resetRequestId,
   };
+}
+
+function isUuid(value) {
+  return typeof value === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function pad(number) {
@@ -315,6 +366,22 @@ function loadAuth(authPath) {
   }
 }
 
+function loadCredentials(authPath) {
+  const auth = loadAuth(authPath);
+  const tokens = auth && typeof auth === 'object' && auth.tokens ? auth.tokens : {};
+  const accessToken = tokens.access_token;
+  const accountId = tokens.account_id;
+
+  if (typeof accessToken !== 'string' || !accessToken.trim()) {
+    throw new Error('auth.json 內未找到 tokens.access_token');
+  }
+
+  return {
+    accessToken,
+    accountId,
+  };
+}
+
 function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -372,15 +439,35 @@ function formatResponseBody(body, sensitiveValues) {
   return ` 回應內容：${shortened}`;
 }
 
-function requestJson(apiUrl, accessToken, accountId, additionalHeaders = {}, dependencies = {}) {
+function requestJsonRequest(
+  apiUrl,
+  accessToken,
+  accountId,
+  requestOptions = {},
+  dependencies = {}
+) {
+  const method = typeof requestOptions.method === 'string'
+    ? requestOptions.method.toUpperCase()
+    : 'GET';
+  const additionalHeaders = isObject(requestOptions.headers) ? requestOptions.headers : {};
+  const requestBody = requestOptions.body === undefined
+    ? null
+    : JSON.stringify(requestOptions.body);
   const headers = {
     ...buildApiHeaders(accessToken, accountId),
     ...additionalHeaders,
   };
+  if (requestBody !== null) {
+    if (!Object.keys(headers).some((name) => name.toLowerCase() === 'content-type')) {
+      headers['Content-Type'] = 'application/json';
+    }
+    headers['Content-Length'] = Buffer.byteLength(requestBody);
+  }
   const sensitiveValues = [accessToken, accountId];
   const endpoint = new URL(apiUrl);
   const setTimeoutFunction = dependencies.setTimeoutFunction || setTimeout;
   const clearTimeoutFunction = dependencies.clearTimeoutFunction || clearTimeout;
+  const outcomeCanBeUncertain = method !== 'GET' && method !== 'HEAD';
 
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -413,7 +500,7 @@ function requestJson(apiUrl, accessToken, accountId, additionalHeaders = {}, dep
 
     const req = https.request(
       {
-        method: 'GET',
+        method,
         hostname: endpoint.hostname,
         path: endpoint.pathname + endpoint.search,
         headers,
@@ -431,6 +518,7 @@ function requestJson(apiUrl, accessToken, accountId, additionalHeaders = {}, dep
           responseBytes += buffer.length;
           if (responseBytes > MAX_RESPONSE_BYTES) {
             const error = new Error(`API 回應超過 ${MAX_RESPONSE_BYTES} bytes 上限`);
+            error.outcomeUncertain = outcomeCanBeUncertain;
             fail(error);
             if (typeof req.destroy === 'function') {
               req.destroy();
@@ -448,25 +536,35 @@ function requestJson(apiUrl, accessToken, accountId, additionalHeaders = {}, dep
 
           if (res.statusCode < 200 || res.statusCode >= 300) {
             const message = formatResponseBody(chunks, sensitiveValues);
-            fail(new Error(`請求 API 失敗，HTTP ${res.statusCode} ${res.statusMessage}.${message}`));
+            const error = new Error(
+              `請求 API 失敗，HTTP ${res.statusCode} ${res.statusMessage}.${message}`
+            );
+            error.statusCode = res.statusCode;
+            error.outcomeUncertain = outcomeCanBeUncertain && res.statusCode >= 500;
+            fail(error);
             return;
           }
 
           try {
             succeed(JSON.parse(chunks));
           } catch (error) {
-            fail(new Error(`回應 JSON 解析失敗：${error.message}`));
+            const parseError = new Error(`回應 JSON 解析失敗：${error.message}`);
+            parseError.outcomeUncertain = outcomeCanBeUncertain;
+            fail(parseError);
           }
         });
 
         res.on('error', (error) => {
-          fail(new Error(`請求 API 失敗：${error.message}`));
+          const requestError = new Error(`請求 API 失敗：${error.message}`);
+          requestError.outcomeUncertain = outcomeCanBeUncertain;
+          fail(requestError);
         });
       }
     );
 
     timeoutHandle = setTimeoutFunction(() => {
       const error = new Error(`請求 API 逾時（超過 ${REQUEST_TIMEOUT_MS / 1000} 秒）`);
+      error.outcomeUncertain = outcomeCanBeUncertain;
       fail(error);
       if (typeof req.destroy === 'function') {
         req.destroy();
@@ -474,11 +572,29 @@ function requestJson(apiUrl, accessToken, accountId, additionalHeaders = {}, dep
     }, REQUEST_TIMEOUT_MS);
 
     req.on('error', (error) => {
-      fail(new Error(`請求 API 失敗：${error.message}`));
+      const requestError = new Error(`請求 API 失敗：${error.message}`);
+      requestError.outcomeUncertain = outcomeCanBeUncertain;
+      fail(requestError);
     });
 
+    if (requestBody !== null && typeof req.write === 'function') {
+      req.write(requestBody);
+    }
     req.end();
   });
+}
+
+function requestJson(apiUrl, accessToken, accountId, additionalHeaders = {}, dependencies = {}) {
+  return requestJsonRequest(
+    apiUrl,
+    accessToken,
+    accountId,
+    {
+      method: 'GET',
+      headers: additionalHeaders,
+    },
+    dependencies
+  );
 }
 
 function requestRateLimit(accessToken, accountId) {
@@ -487,6 +603,21 @@ function requestRateLimit(accessToken, accountId) {
 
 function requestUsage(accessToken, accountId) {
   return requestJson(USAGE_API_URL, accessToken, accountId);
+}
+
+function requestConsumeReset(accessToken, accountId, redeemRequestId, dependencies = {}) {
+  return requestJsonRequest(
+    RESET_CONSUME_API_URL,
+    accessToken,
+    accountId,
+    {
+      method: 'POST',
+      body: {
+        redeem_request_id: redeemRequestId,
+      },
+    },
+    dependencies
+  );
 }
 
 function toFiniteNumber(value) {
@@ -1373,17 +1504,313 @@ function printCredits(credits, layout = getManualResetLayout(credits)) {
   printCreditCardsInSingleColumn(layout.cards);
 }
 
+function createRedeemRequestId(randomUUIDFunction = crypto.randomUUID) {
+  if (typeof randomUUIDFunction === 'function') {
+    return randomUUIDFunction();
+  }
+
+  const bytes = crypto.randomBytes(16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20),
+  ].join('-');
+}
+
+function getAvailableResetCount(rateLimitResponse) {
+  if (!isObject(rateLimitResponse)) {
+    return null;
+  }
+
+  const value = toFiniteNumber(rateLimitResponse.available_count);
+  if (value === null || value < 0 || !Number.isInteger(value)) {
+    return null;
+  }
+
+  return value;
+}
+
+function getUsageWindowEntries(usage) {
+  if (!isObject(usage)) {
+    return [];
+  }
+
+  const entries = [
+    ['primary', usage.primary_window],
+    ['secondary', usage.secondary_window],
+  ];
+  const additionalLimits = Array.isArray(usage.additional_rate_limits)
+    ? usage.additional_rate_limits
+    : [];
+
+  for (const limit of additionalLimits) {
+    if (!isObject(limit)) {
+      continue;
+    }
+
+    entries.push(
+      [`additional:${limit.id}:primary`, limit.primary_window],
+      [`additional:${limit.id}:secondary`, limit.secondary_window]
+    );
+  }
+
+  return entries.filter(([, window]) => isObject(window));
+}
+
+function compareUsageDecrease(beforeUsage, afterUsage) {
+  const beforeWindows = new Map(
+    getUsageWindowEntries(beforeUsage).map(([key, window]) => [key, window.used_percent])
+  );
+  let comparable = false;
+
+  for (const [key, window] of getUsageWindowEntries(afterUsage)) {
+    const before = beforeWindows.get(key);
+    const after = window.used_percent;
+    if (typeof before !== 'number' || typeof after !== 'number') {
+      continue;
+    }
+
+    comparable = true;
+    if (after < before) {
+      return {
+        comparable: true,
+        decreased: true,
+      };
+    }
+  }
+
+  return {
+    comparable,
+    decreased: false,
+  };
+}
+
+function printResetPreview(availableCount, usage) {
+  console.log(paint('bold', '準備重置 Codex 用量'));
+  console.log(`可用手動重置額度：${availableCount}`);
+
+  const windows = getUsageWindowEntries(usage)
+    .filter(([key]) => key === 'primary' || key === 'secondary');
+  for (const [, window] of windows) {
+    console.log(`${window.name}：已使用 ${formatPercent(window.used_percent)}`);
+  }
+
+  console.log('此操作可能消耗一筆不可復原的手動重置額度。');
+}
+
+function confirmResetUsage(
+  availableCount,
+  input = process.stdin,
+  output = process.stdout
+) {
+  if (!input || !input.isTTY || !output || !output.isTTY) {
+    throw new Error('--reset 只能在互動式終端機執行');
+  }
+
+  const prompt = `輸入「確認重置用量」以使用 1 筆額度（目前可用 ${availableCount} 筆）：`;
+  const interface = readline.createInterface({
+    input,
+    output,
+  });
+
+  return new Promise((resolve) => {
+    interface.question(prompt, (answer) => {
+      interface.close();
+      resolve(answer.trim() === '確認重置用量');
+    });
+  });
+}
+
+function normalizeResetOutcome(response) {
+  if (!isObject(response)) {
+    return null;
+  }
+
+  const rawOutcome = response.code ?? response.outcome;
+  const outcomes = {
+    reset: 'reset',
+    already_redeemed: 'already_redeemed',
+    alreadyRedeemed: 'already_redeemed',
+    nothing_to_reset: 'nothing_to_reset',
+    nothingToReset: 'nothing_to_reset',
+    no_credit: 'no_credit',
+    noCredit: 'no_credit',
+  };
+
+  return outcomes[rawOutcome] || null;
+}
+
+function printResetVerificationWarnings(beforeState, afterState) {
+  const comparison = compareUsageDecrease(beforeState.usage, afterState.usage);
+  if (!comparison.comparable) {
+    console.error(
+      paint('yellow', '警告：重置已獲後端接受，但查無足夠的前後用量資料可驗證是否恢復。')
+    );
+  } else if (!comparison.decreased) {
+    console.error(
+      paint(
+        'yellow',
+        '警告：重置已獲後端接受，但重新查詢後未觀察到用量下降；請勿使用新的 UUID 立即重試。'
+      )
+    );
+  }
+
+  const beforeCount = getAvailableResetCount(beforeState.rateLimit);
+  const afterCount = getAvailableResetCount(afterState.rateLimit);
+  if (beforeCount !== null && afterCount !== null && afterCount >= beforeCount) {
+    console.error(
+      paint('yellow', '警告：重新查詢後尚未觀察到可用手動重置額度減少。')
+    );
+  }
+}
+
+async function runReset(options, dependencies = {}) {
+  const { accessToken, accountId } = loadCredentials(options.authPath);
+  const requestRateLimitFunction = dependencies.requestRateLimitFunction || requestRateLimit;
+  const requestUsageFunction = dependencies.requestUsageFunction || requestUsage;
+  const requestConsumeResetFunction =
+    dependencies.requestConsumeResetFunction || requestConsumeReset;
+  const confirmationFunction = dependencies.confirmationFunction || confirmResetUsage;
+  const renderAfterFunction = dependencies.renderAfterFunction || runOnce;
+  const createRequestIdFunction =
+    dependencies.createRequestIdFunction || createRedeemRequestId;
+
+  const [rateLimitRequest, usageRequest] = await Promise.allSettled([
+    requestRateLimitFunction(accessToken, accountId),
+    requestUsageFunction(accessToken, accountId),
+  ]);
+
+  if (rateLimitRequest.status === 'rejected') {
+    throw rateLimitRequest.reason;
+  }
+
+  const rateLimit = rateLimitRequest.value;
+  const availableCount = getAvailableResetCount(rateLimit);
+  if (availableCount === null) {
+    throw new Error('手動重置額度 API 回傳格式非預期：缺少有效的 available_count');
+  }
+  if (availableCount === 0) {
+    throw new Error('目前沒有可用的手動重置額度');
+  }
+
+  let usage = null;
+  if (usageRequest.status === 'fulfilled') {
+    try {
+      usage = normalizeUsageResponse(usageRequest.value);
+    } catch (error) {
+      console.error(
+        paint('yellow', `警告：重置前無法解析使用額度。${getErrorMessage(error)}`)
+      );
+    }
+  } else {
+    console.error(
+      paint('yellow', `警告：重置前無法查詢使用額度。${getErrorMessage(usageRequest.reason)}`)
+    );
+  }
+
+  printResetPreview(availableCount, usage);
+  const confirmed = await confirmationFunction(availableCount);
+  if (!confirmed) {
+    console.log('已取消，未使用手動重置額度。');
+    return {
+      outcome: 'cancelled',
+    };
+  }
+
+  const redeemRequestId = options.resetRequestId || createRequestIdFunction();
+  if (!isUuid(redeemRequestId)) {
+    throw new Error('產生的重置冪等鍵不是有效的 UUID');
+  }
+
+  let consumeResponse;
+  try {
+    consumeResponse = await requestConsumeResetFunction(
+      accessToken,
+      accountId,
+      redeemRequestId
+    );
+  } catch (error) {
+    if (error && error.outcomeUncertain) {
+      throw new Error(
+        `${getErrorMessage(error)} 重置結果不明，請勿產生新的 UUID；確認後請使用 --reset=${redeemRequestId} 重試同一次操作。`
+      );
+    }
+
+    throw error;
+  }
+
+  const outcome = normalizeResetOutcome(consumeResponse);
+  if (outcome === 'nothing_to_reset') {
+    throw new Error('後端回報目前沒有符合重置資格的用量視窗；未使用手動重置額度');
+  }
+  if (outcome === 'no_credit') {
+    throw new Error('後端回報沒有可用的手動重置額度');
+  }
+  if (!outcome) {
+    const responseText = sanitizeSensitiveText(JSON.stringify(consumeResponse), [
+      accessToken,
+      accountId,
+    ]);
+    throw new Error(`重置 API 回傳未知結果：${responseText}`);
+  }
+
+  if (outcome === 'already_redeemed') {
+    console.log('相同冪等鍵的重置操作先前已完成；不會再次消耗額度。');
+  } else {
+    const windowsReset = toFiniteNumber(consumeResponse.windows_reset);
+    const suffix = windowsReset === null ? '' : `，後端回報重置 ${windowsReset} 個用量視窗`;
+    console.log(`後端已接受重置並使用 1 筆額度${suffix}。`);
+  }
+
+  console.log('重新查詢目前用量與手動重置額度：');
+  let afterState;
+  try {
+    afterState = await renderAfterFunction({
+      ...options,
+      reset: false,
+      resetRequestId: null,
+    });
+  } catch (error) {
+    console.error(
+      paint(
+        'yellow',
+        `警告：後端已接受重置，但重新查詢驗證失敗。請勿使用新的 UUID 立即重試。${getErrorMessage(error)}`
+      )
+    );
+    return {
+      outcome,
+      redeemRequestId,
+      consumeResponse,
+      verification: null,
+    };
+  }
+
+  if (outcome === 'reset') {
+    printResetVerificationWarnings(
+      {
+        rateLimit,
+        usage,
+      },
+      afterState
+    );
+  }
+
+  return {
+    outcome,
+    redeemRequestId,
+    consumeResponse,
+    verification: afterState,
+  };
+}
+
 async function runOnce(options) {
   const authPath = options.authPath;
-  const auth = loadAuth(authPath);
-
-  const tokens = auth && typeof auth === 'object' && auth.tokens ? auth.tokens : {};
-  const accessToken = tokens.access_token;
-  const accountId = tokens.account_id;
-
-  if (typeof accessToken !== 'string' || !accessToken.trim()) {
-    throw new Error('auth.json 內未找到 tokens.access_token');
-  }
+  const { accessToken, accountId } = loadCredentials(authPath);
 
   const [rateLimitRequest, usageRequest, accountRequest] = await Promise.allSettled([
     requestRateLimit(accessToken, accountId),
@@ -1457,7 +1884,11 @@ async function runOnce(options) {
     }
 
     console.log(sanitizeSensitiveText(JSON.stringify(output), [accessToken, accountId]));
-    return;
+    return {
+      rateLimit: result,
+      usage,
+      usageRaw,
+    };
   }
 
   const credits = Array.isArray(result.credits)
@@ -1497,6 +1928,12 @@ async function runOnce(options) {
       });
     }
   }
+
+  return {
+    rateLimit: result,
+    usage,
+    usageRaw,
+  };
 }
 
 function startWatch(options, dependencies = {}) {
@@ -1703,6 +2140,11 @@ function startWatch(options, dependencies = {}) {
 
 async function main() {
   const options = getCliOptions(process.argv.slice(2));
+  if (options.reset) {
+    await runReset(options);
+    return;
+  }
+
   if (options.watch) {
     const watcher = startWatch(options);
     await watcher.ready;
@@ -1722,8 +2164,12 @@ if (require.main === module) {
 module.exports = {
   buildApiHeaders,
   buildRoundedBoxLines,
+  compareUsageDecrease,
+  confirmResetUsage,
+  createRedeemRequestId,
   formatCompactDurationFromSeconds,
   formatUsageReset,
+  getAvailableResetCount,
   getCliOptions,
   getWatchCountdownSeconds,
   getCurrentTerminalWidth,
@@ -1734,10 +2180,14 @@ module.exports = {
   main,
   normalizeUsageResponse,
   normalizeUsageWindow,
+  normalizeResetOutcome,
   requestJson,
+  requestJsonRequest,
+  requestConsumeReset,
   requestRateLimit,
   requestUsage,
   runOnce,
+  runReset,
   sanitizeSensitiveText,
   startWatch,
   terminalSizeChanged,

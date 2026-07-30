@@ -2,14 +2,14 @@
 
 ## 專案介紹
 
-這是用來查詢 Codex/ChatGPT 使用額度與手動重置額度的 CLI 工具，重點在於快速取得目前額度資訊。
+這是用來查詢 Codex/ChatGPT 使用額度與手動重置額度的 CLI 工具，也能在明確確認後使用一筆手動重置額度。
 
 工具會讀取本機 Codex 登入資訊中的存取權杖，呼叫 ChatGPT 後端取得以下兩類資料：
 
 - `使用額度`：目前工作階段、每週視窗，以及 API 有提供時的模型專用額度之已使用比例、剩餘比例及重置倒數。
 - `手動重置額度`：可用次數，以及每筆額度的取得時間、到期時間與剩餘時間。
 
-整個流程只做查詢，不會修改本機檔案，也不會輸出 `access_token` 或 `account_id`。
+預設流程只做查詢，不會修改本機檔案，也不會輸出 `access_token` 或 `account_id`。只有明確使用 `--reset` 並完成互動確認時，工具才會要求後端消耗一筆手動重置額度。
 
 快速開始：
 
@@ -94,6 +94,23 @@ codex-reset-checker --auth /path/to/auth.json --json
 
 `--json` 會在保留手動重置 API 原始欄位的前提下，輸出單行 JSON。輸出會新增標準化的 `usage` 欄位，並以 `usage_raw` 保留 `/wham/usage` 的原始回應，適合交給其他工具處理。使用額度查詢失敗時，`usage` 會是 `null`，並新增 `usage_error`；警告會輸出至標準錯誤，不混入 JSON 標準輸出。
 
+### 使用一筆手動重置額度
+
+```bash
+codex-reset-checker --reset
+codex-reset-checker --auth /path/to/auth.json --reset
+```
+
+`--reset` 會先查詢可用額度與目前用量，只有在互動式終端機中完整輸入 `確認重置用量` 後，才會送出重置請求。此操作可能消耗一筆不可復原的手動重置額度，因此不可與 `--json` 或 `--watch` 同時使用，也不提供略過確認的選項。
+
+每次新的重置操作都會建立 UUID 冪等鍵。如果 POST 請求逾時、連線中斷或收到 5xx，結果可能不明；工具會顯示同一個 UUID，必須使用以下格式重試同一次操作，避免以新 UUID 重複消耗：
+
+```bash
+codex-reset-checker --reset=8ae96ff3-3425-4f4c-8772-b6fd61502868
+```
+
+後端回報成功後，工具會重新查詢使用量與剩餘重置額度。若尚未觀察到用量下降或額度數量更新，工具只會顯示警告，**不會宣稱重置已驗證生效，也不會自動重試**。
+
 ### 持續監看
 
 ```bash
@@ -112,6 +129,7 @@ codex-reset-checker --auth /path/to/auth.json --watch
 node ./bin/codex-reset-checker.js
 node ./bin/codex-reset-checker.js --auth /path/to/auth.json
 node ./bin/codex-reset-checker.js --json
+node ./bin/codex-reset-checker.js --reset
 ```
 
 ### 從 npm 一次性執行
@@ -161,14 +179,19 @@ codex-reset-checker
 | `originator` | `Codex Desktop` |
 | `ChatGPT-Account-ID` | `<account_id>`（若存在才加入） |
 
-請求方法：`GET`
-
 請求 URL：
 
-- 手動重置額度：`https://chatgpt.com/backend-api/wham/rate-limit-reset-credits`
-- 使用額度：`https://chatgpt.com/backend-api/wham/usage`
+- `GET` 手動重置額度：`https://chatgpt.com/backend-api/wham/rate-limit-reset-credits`
+- `GET` 使用額度：`https://chatgpt.com/backend-api/wham/usage`
+- `POST` 使用一筆手動重置額度：`https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume`
 
-其中 `/wham/usage` 是 ChatGPT 後端的非公開端點，僅依目前 Codex 用戶端可觀察到的回應格式解析。GPT-5.3-Codex-Spark 只有在帳號與當次回應包含相應的 `additional_rate_limits` 時才會顯示，不會從一般額度推算 Spark 用量。
+上述 `/wham` 路徑皆為 ChatGPT 後端的非公開端點，僅依目前 Codex 用戶端可觀察到的格式處理。GPT-5.3-Codex-Spark 只有在帳號與當次回應包含相應的 `additional_rate_limits` 時才會顯示，不會從一般額度推算 Spark 用量。
+
+重置 POST 會傳送以下 JSON，其中 UUID 是單次邏輯操作的冪等鍵：
+
+```json
+{"redeem_request_id":"8ae96ff3-3425-4f4c-8772-b6fd61502868"}
+```
 
 * * *
 
@@ -288,11 +311,14 @@ JSON 輸出範例：
 - `錯誤：讀取或解析 auth.json 失敗：...`
 - `錯誤：請求 API 失敗，HTTP 401 Unauthorized...`
 - `錯誤：請求 API 失敗，HTTP 403 Forbidden...`
+- `錯誤：後端回報目前沒有符合重置資格的用量視窗；未使用手動重置額度`
+- `錯誤：...重置結果不明，請勿產生新的 UUID；確認後請使用 --reset=<uuid> 重試同一次操作。`
 - `警告：使用額度查詢失敗，仍顯示手動重置額度。...`
+- `警告：重置已獲後端接受，但重新查詢後未觀察到用量下降...`
 
 手動重置額度查詢失敗時，程式會以非零狀態退出。使用額度查詢是附加流程；若該端點收到 401、429、5xx 或回應格式無法解析，程式仍會顯示手動重置額度。`--json` 模式會以 `usage: null` 與 `usage_error` 表示這個狀態。
 
-若收到 401/403，多半是 Token 過期、登入權限問題或會話已失效，請先在 Codex 端重新登入，確認 `~/.codex/auth.json` 已更新。錯誤回應中的 Token 與帳號識別值會遮罩，不會輸出。
+若查詢收到 401/403，多半是 Token 過期、登入權限問題或會話已失效，請先在 Codex 端重新登入，確認 `~/.codex/auth.json` 已更新。重置端點的 403 也可能包含 `rate_limit_reset_ineligible`，代表後端判定目前不符合重置資格。錯誤回應中的 Token 與帳號識別值會遮罩，不會輸出。
 
 * * *
 
@@ -352,5 +378,7 @@ CI 會在 `main` 的 push 與所有 pull request 上，使用 Node.js 14、18、
 - 不輸出 `access_token` 或 `account_id`
 - 只讀取本機 `auth.json`
 - 無資料持久化、無快取、無遙測
+- 預設查詢保持唯讀；只有 `--reset` 加上明確互動確認才會要求後端消耗一筆額度
+- 結果不明時保留並顯示冪等 UUID，不會以新的 UUID 自動重試
 
-`/wham/usage` 並非 OpenAI 公開 API，回應格式、權限與可用性可能變更。這項功能顯示的是 Codex 工作階段與週期的使用額度，不宣稱為可購買 Credits 的餘額。OpenAI 官方目前說明可在 ChatGPT 的 Codex Settings > Usage Dashboard 查看 Credits 餘額，未提供本工具可依賴的公開 Access Token API：[Using Credits for Flexible Usage in ChatGPT](https://help.openai.com/en/articles/12642688-using-credits-for-flexible-usage-in-chatgpt-plus-pro)。
+`/wham/usage` 與 `/wham/rate-limit-reset-credits/*` 並非 OpenAI 公開 API，回應格式、權限與可用性可能變更。這項功能顯示及使用的是 Codex 手動重置額度，不宣稱為可購買 Credits 的餘額。OpenAI 官方目前說明可在 ChatGPT 的 Codex Settings > Usage Dashboard 查看 Credits 餘額，未提供本工具可依賴的公開 Access Token API：[Using Credits for Flexible Usage in ChatGPT](https://help.openai.com/en/articles/12642688-using-credits-for-flexible-usage-in-chatgpt-plus-pro)。
