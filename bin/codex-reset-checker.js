@@ -1456,7 +1456,7 @@ function printManualResetSection(credits, layout) {
   printCredits(credits, layout);
 }
 
-function prepareCreditCards(credits) {
+function prepareCreditCards(credits, minimumContentWidth = CREDIT_WIDTH) {
   const prepared = (Array.isArray(credits) ? credits : [])
     .map((credit, index) => {
       if (!credit || typeof credit !== 'object') {
@@ -1464,7 +1464,11 @@ function prepareCreditCards(credits) {
       }
 
       const lines = getCreditCardLines(index, credit);
-      const contentWidth = Math.max(CREDIT_WIDTH, ...lines.map((item) => textDisplayWidth(item)));
+      const contentWidth = Math.max(
+        minimumContentWidth,
+        CREDIT_WIDTH,
+        ...lines.map((item) => textDisplayWidth(item))
+      );
       return {
         lines,
         width: contentWidth,
@@ -1489,8 +1493,12 @@ function prepareCreditCards(credits) {
 }
 
 function getManualResetLayout(credits) {
-  const prepared = prepareCreditCards(credits);
   const terminalWidth = getCurrentTerminalWidth();
+  let prepared = prepareCreditCards(credits);
+  const naturalCardOuterWidth = prepared.contentWidth + 4;
+  if (prepared.cards.length === 1 && terminalWidth > naturalCardOuterWidth) {
+    prepared = prepareCreditCards(credits, terminalWidth - 4);
+  }
   const cardOuterWidth = prepared.contentWidth + 4;
   const twoColumns =
     prepared.cards.length >= 2 && terminalWidth >= cardOuterWidth * 2 + CREDIT_GAP;
