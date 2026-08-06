@@ -69,6 +69,8 @@ function printUsage() {
   --reset         經確認後使用一筆手動重置額度
   --reset=<uuid>  以相同冪等鍵重試結果不明的重置操作
   --force         與 --reset 搭配，略過互動確認直接重置
+  --time-format   日期時間顯示格式：local、utc 或 iso（預設 local）
+  -t, --exact-time  重設時間直接顯示確切時間，不顯示倒數
   -w, --watch     持續監看；Spacebar 刷新，q 結束
   -h, --help      顯示說明`);
 }
@@ -80,6 +82,9 @@ function getCliOptions(cliArgs) {
   let reset = false;
   let resetRequestId = null;
   let force = false;
+  let timeFormat = 'local';
+  let timeFormatSpecified = false;
+  let exactTime = false;
 
   for (let i = 0; i < cliArgs.length; i++) {
     const arg = cliArgs[i];
@@ -133,6 +138,54 @@ function getCliOptions(cliArgs) {
       }
 
       force = true;
+      continue;
+    }
+
+    if (arg === '--exact-time' || arg === '-t') {
+      if (exactTime) {
+        throw new Error('--exact-time 只能指定一次');
+      }
+
+      exactTime = true;
+      continue;
+    }
+
+    if (arg === '--time-format') {
+      const value = cliArgs[i + 1];
+      if (!value || value.startsWith('-')) {
+        throw new Error('--time-format 需要指定 local、utc 或 iso');
+      }
+
+      if (timeFormatSpecified) {
+        throw new Error('--time-format 只能指定一次');
+      }
+
+      if (!['local', 'utc', 'iso'].includes(value)) {
+        throw new Error('--time-format 只支援 local、utc 或 iso');
+      }
+
+      timeFormat = value;
+      timeFormatSpecified = true;
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--time-format=')) {
+      const value = arg.slice('--time-format='.length);
+      if (!value) {
+        throw new Error('--time-format 需要指定 local、utc 或 iso');
+      }
+
+      if (timeFormatSpecified) {
+        throw new Error('--time-format 只能指定一次');
+      }
+
+      if (!['local', 'utc', 'iso'].includes(value)) {
+        throw new Error('--time-format 只支援 local、utc 或 iso');
+      }
+
+      timeFormat = value;
+      timeFormatSpecified = true;
       continue;
     }
 
@@ -190,7 +243,7 @@ function getCliOptions(cliArgs) {
   }
 
   if (authPath) {
-    return { authPath, json, watch, reset, resetRequestId, force };
+    return { authPath, json, watch, reset, resetRequestId, force, timeFormat, exactTime };
   }
 
   const home = process.platform === 'win32'
@@ -204,6 +257,8 @@ function getCliOptions(cliArgs) {
     reset,
     resetRequestId,
     force,
+    timeFormat,
+    exactTime,
   };
 }
 
@@ -217,6 +272,10 @@ function pad(number) {
 }
 
 function formatShortDate(value) {
+  return formatDateTime(value, 'local', { withSeconds: false });
+}
+
+function formatDateTime(value, timeFormat = 'local', options = {}) {
   if (!value) {
     return 'N/A';
   }
@@ -226,9 +285,28 @@ function formatShortDate(value) {
     return String(value);
   }
 
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
-    date.getHours()
-  )}:${pad(date.getMinutes())}`;
+  const normalizedFormat = ['local', 'utc', 'iso'].includes(timeFormat) ? timeFormat : 'local';
+  const withSeconds = options.withSeconds === true;
+
+  if (normalizedFormat === 'iso') {
+    return date.toISOString();
+  }
+
+  const isUtc = normalizedFormat === 'utc';
+  const year = isUtc ? date.getUTCFullYear() : date.getFullYear();
+  const month = isUtc ? date.getUTCMonth() + 1 : date.getMonth() + 1;
+  const day = isUtc ? date.getUTCDate() : date.getDate();
+  const hours = isUtc ? date.getUTCHours() : date.getHours();
+  const minutes = isUtc ? date.getUTCMinutes() : date.getMinutes();
+  const seconds = isUtc ? date.getUTCSeconds() : date.getSeconds();
+  const offsetMinutes = isUtc ? 0 : -date.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? '+' : '-';
+  const absoluteOffset = Math.abs(offsetMinutes);
+  const tzString = `${sign}${pad(Math.floor(absoluteOffset / 60))}:${pad(absoluteOffset % 60)}`;
+
+  const datePart = `${year}-${pad(month)}-${pad(day)} ${pad(hours)}:${pad(minutes)}`;
+  const timePart = withSeconds ? `:${pad(seconds)}` : '';
+  return `${datePart}${timePart} ${tzString}`;
 }
 
 function compactRemaining(expireValue) {
@@ -308,25 +386,7 @@ function compactRemaining(expireValue) {
 }
 
 function formatLocalTime(value) {
-  if (!value) {
-    return 'N/A';
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return String(value);
-  }
-
-  const offsetMinutes = -date.getTimezoneOffset();
-  const sign = offsetMinutes >= 0 ? '+' : '-';
-  const absoluteOffset = Math.abs(offsetMinutes);
-  const tzHour = pad(Math.floor(absoluteOffset / 60));
-  const tzMinute = pad(absoluteOffset % 60);
-  const tzString = `${sign}${tzHour}:${tzMinute}`;
-
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
-    date.getHours()
-  )}:${pad(date.getMinutes())}:${pad(date.getSeconds())} ${tzString}`;
+  return formatDateTime(value, 'local', { withSeconds: true });
 }
 
 function humanizeRemaining(expireValue) {
@@ -914,7 +974,31 @@ function getUsageResetSeconds(window) {
   return null;
 }
 
-function formatUsageReset(window) {
+function getUsageResetTimestamp(window) {
+  if (!isObject(window)) {
+    return null;
+  }
+
+  if (window.reset_at !== null && window.reset_at !== undefined) {
+    const numericResetAt = Number(window.reset_at);
+    if (Number.isFinite(numericResetAt)) {
+      return numericResetAt * 1000;
+    }
+    const parsed = new Date(window.reset_at);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
+  }
+
+  if (window.reset_after_seconds !== null && window.reset_after_seconds !== undefined) {
+    const numericSeconds = Number(window.reset_after_seconds);
+    if (Number.isFinite(numericSeconds)) {
+      return Date.now() + numericSeconds * 1000;
+    }
+  }
+
+  return null;
+}
+
+function formatUsageReset(window, options = {}) {
   const seconds = getUsageResetSeconds(window);
   if (seconds === null) {
     return '重置時間：未提供';
@@ -922,6 +1006,13 @@ function formatUsageReset(window) {
 
   if (seconds <= 0) {
     return '已到重置時間';
+  }
+
+  if (options.exactTime) {
+    const timestamp = getUsageResetTimestamp(window);
+    if (timestamp !== null) {
+      return `於 ${formatDateTime(timestamp, options.timeFormat || 'local', { withSeconds: false })} 重置`;
+    }
   }
 
   return `約 ${formatCompactDurationFromSeconds(seconds)} 後重置`;
@@ -946,6 +1037,50 @@ function getUsageColor(usedPercent) {
 const USAGE_CARD_WIDTH = 42;
 const USAGE_BAR_WIDTH = 28;
 const USAGE_CARD_GAP = 2;
+const USAGE_CARD_RESET_LINE_INDEX = 3;
+const MOUSE_INPUT_BUFFER_LIMIT = 128;
+
+function extractMouseEvents(input) {
+  const events = [];
+  let rest = input;
+  const sgrPattern = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])/;
+  const x10Pattern = /^\x1b\[M([\s\S])([\s\S])([\s\S])/;
+  let matched = true;
+
+  while (matched) {
+    matched = false;
+
+    const sgr = rest.match(sgrPattern);
+    if (sgr) {
+      events.push({
+        button: Number(sgr[1]),
+        col: Number(sgr[2]),
+        row: Number(sgr[3]),
+        press: sgr[4] === 'M',
+      });
+      rest = rest.slice(sgr[0].length);
+      matched = true;
+      continue;
+    }
+
+    const x10 = rest.match(x10Pattern);
+    if (x10) {
+      events.push({
+        button: x10[1].charCodeAt(0) - 32,
+        col: x10[2].charCodeAt(0) - 32,
+        row: x10[3].charCodeAt(0) - 32,
+        press: true,
+      });
+      rest = rest.slice(x10[0].length);
+      matched = true;
+    }
+  }
+
+  return {
+    events,
+    rest,
+  };
+}
 
 function getCurrentTerminalWidth() {
   if (!process.stdout) {
@@ -1024,11 +1159,11 @@ function buildRoundedBoxLines(contentLines, contentWidth) {
   return [paint('bold', top), ...body, paint('bold', bottom)];
 }
 
-function buildUsageCardLines(title, window, contentWidth = USAGE_CARD_WIDTH) {
+function buildUsageCardLines(title, window, contentWidth = USAGE_CARD_WIDTH, displayOptions = {}) {
   const color = getUsageColor(window.used_percent);
   const remaining = formatPercent(window.remaining_percent);
   const used = formatPercent(window.used_percent);
-  const reset = formatUsageReset(window)
+  const reset = formatUsageReset(window, displayOptions)
     .replace(/^重置時間：/, '')
     .replace(/重置$/, '重設');
   const contentLines = [
@@ -1085,22 +1220,64 @@ function getUsageLayout(cards, maxTotalWidth = 0) {
   };
 }
 
-function printUsageCards(cards, layout = getUsageLayout(cards)) {
+function printUsageCards(cards, layout = getUsageLayout(cards), displayOptions = {}) {
+  const renderState = displayOptions.renderState || null;
   const normalizedCards = cards.map((card) => ({
-    lines: buildUsageCardLines(card.title, card.window, layout.cardContentWidth),
+    lines: buildUsageCardLines(card.title, card.window, layout.cardContentWidth, displayOptions),
   }));
 
+  const cardOuterWidth = layout.cardContentWidth + 4;
+  let printedLines = 0;
+
   if (layout.twoColumns) {
-    printCreditCardsInTwoColumns(
+    printedLines = printCreditCardsInTwoColumns(
       normalizedCards,
       layout.terminalWidth,
       layout.cardContentWidth,
       USAGE_CARD_GAP
     );
-    return;
+    if (renderState) {
+      const rowHeight = Math.max(...normalizedCards.map((card) => card.lines.length));
+      const gap = USAGE_CARD_GAP;
+      let pairIndex = 0;
+      for (let i = 0; i < normalizedCards.length; i += 2) {
+        const pairBaseRow = renderState.row + pairIndex * rowHeight;
+        pairIndex += 1;
+        const zoneRow = pairBaseRow + USAGE_CARD_RESET_LINE_INDEX + 2;
+        renderState.zones.push({
+          row: zoneRow,
+          colStart: 1,
+          colEnd: cardOuterWidth - 1,
+        });
+        if (normalizedCards[i + 1]) {
+          const rightEdge = cardOuterWidth + gap + 1;
+          renderState.zones.push({
+            row: zoneRow,
+            colStart: rightEdge,
+            colEnd: rightEdge + cardOuterWidth - 2,
+          });
+        }
+      }
+    }
+  } else {
+    printedLines = printCreditCardsInSingleColumn(normalizedCards);
+    if (renderState) {
+      let baseRow = renderState.row;
+      normalizedCards.forEach((card) => {
+        renderState.zones.push({
+          row: baseRow + USAGE_CARD_RESET_LINE_INDEX + 2,
+          colStart: 1,
+          colEnd: cardOuterWidth - 1,
+        });
+        baseRow += card.lines.length;
+      });
+    }
   }
 
-  printCreditCardsInSingleColumn(normalizedCards);
+  if (renderState) {
+    renderState.row += printedLines;
+  }
+  return printedLines;
 }
 
 function getUsageCards(usage) {
@@ -1149,7 +1326,7 @@ function getUsageCards(usage) {
   return cards;
 }
 
-function printUsageSection(usage, layout) {
+function printUsageSection(usage, layout, displayOptions = {}) {
   console.log(paint('bold', '使用額度'));
 
   const cards = getUsageCards(usage);
@@ -1158,7 +1335,11 @@ function printUsageSection(usage, layout) {
     return;
   }
 
-  printUsageCards(cards, layout || getUsageLayout(cards));
+  const renderState = displayOptions.renderState || null;
+  if (renderState) {
+    renderState.row += 1;
+  }
+  printUsageCards(cards, layout || getUsageLayout(cards), displayOptions);
 }
 
 function parseStatusMood(status) {
@@ -1253,10 +1434,11 @@ function textDisplayWidth(value) {
   return width;
 }
 
-function getCreditCardLines(index, credit) {
+function getCreditCardLines(index, credit, displayOptions = {}) {
   const mood = parseStatusMood(credit.status);
-  const grantedAt = formatShortDate(credit.granted_at);
-  const expiresAt = formatShortDate(credit.expires_at);
+  const timeFormat = displayOptions.timeFormat || 'local';
+  const grantedAt = formatDateTime(credit.granted_at, timeFormat, { withSeconds: false });
+  const expiresAt = formatDateTime(credit.expires_at, timeFormat, { withSeconds: false });
   const remaining = compactRemaining(credit.expires_at);
   const idx = String(index + 1).padStart(3, '0');
   const status = credit.status != null ? credit.status : 'N/A';
@@ -1289,11 +1471,14 @@ function buildCreditCardLines(lines, contentWidth = CREDIT_WIDTH) {
 }
 
 function printCreditCardsInSingleColumn(cards) {
+  let printedLines = 0;
   cards.forEach((card) => {
     card.lines.forEach((line) => {
       console.log(line);
+      printedLines += 1;
     });
   });
+  return printedLines;
 }
 
 function printCreditCardsInTwoColumns(cards, terminalWidth, cardWidth, gap = CREDIT_GAP) {
@@ -1301,11 +1486,12 @@ function printCreditCardsInTwoColumns(cards, terminalWidth, cardWidth, gap = CRE
   const canTwoColumns = cards.length >= 2 && terminalWidth >= cardOuterWidth * 2 + gap;
 
   if (!canTwoColumns) {
-    return false;
+    return 0;
   }
 
   const cardLines = cards.map((card) => card.lines);
   const rowHeight = Math.max(...cardLines.map((item) => item.length));
+  let printedLines = 0;
 
   for (let i = 0; i < cardLines.length; i += 2) {
     const left = cardLines[i];
@@ -1316,10 +1502,11 @@ function printCreditCardsInTwoColumns(cards, terminalWidth, cardWidth, gap = CRE
       const rightLine = right ? right[row] : '';
       const columnGap = right ? ' '.repeat(gap) : '';
       console.log(`${leftLine}${columnGap}${rightLine}`);
+      printedLines += 1;
     }
   }
 
-  return true;
+  return printedLines;
 }
 
 function getWatchCountdownSeconds(nextRefreshAt, now = Date.now()) {
@@ -1349,7 +1536,7 @@ function formatPlanName(planType) {
     .join(' ');
 }
 
-function formatRenewalTime(expiresAt) {
+function formatRenewalTime(expiresAt, timeFormat = 'local') {
   if (expiresAt === null || expiresAt === undefined || expiresAt === '') {
     return 'N/A';
   }
@@ -1362,9 +1549,7 @@ function formatRenewalTime(expiresAt) {
     return 'N/A';
   }
 
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
-    date.getHours()
-  )}:${pad(date.getMinutes())}`;
+  return formatDateTime(date, timeFormat, { withSeconds: false });
 }
 
 function getSubscriptionExpiresAt(accountStatus, accountId) {
@@ -1397,7 +1582,10 @@ function getSubscriptionExpiresAt(accountStatus, accountId) {
 function buildHeaderDetailLines(nowText, contentWidth, accountInfo = {}) {
   const queryTime = `${paint('dim', '查詢時間')}：${paint('cyan', nowText)}`;
   const plan = `${paint('dim', '方案')}：${paint('cyan', formatPlanName(accountInfo.planType))}`;
-  const renewal = `${paint('dim', '續約時間')}：${paint('cyan', formatRenewalTime(accountInfo.renewalAt))}`;
+  const renewal = `${paint('dim', '續約時間')}：${paint(
+    'cyan',
+    formatRenewalTime(accountInfo.renewalAt, accountInfo.timeFormat)
+  )}`;
   const accountSummary = `${plan}  ${renewal}`;
   const inlinePadding = contentWidth - textDisplayWidth(queryTime) - textDisplayWidth(accountSummary);
 
@@ -1409,8 +1597,13 @@ function buildHeaderDetailLines(nowText, contentWidth, accountInfo = {}) {
   return [queryTime, `${' '.repeat(summaryPadding)}${accountSummary}`];
 }
 
-function buildWatchControlsLine(countdownSeconds, lineWidth) {
-  const controls = paint('dim', 'Spacebar 立即刷新，q 結束監視。');
+function buildWatchControlsLine(countdownSeconds, lineWidth, showToggleHint = false) {
+  const controls = paint(
+    'dim',
+    showToggleHint
+      ? 'Spacebar 立即刷新，q 結束監視；點擊「重設時間」切換顯示。'
+      : 'Spacebar 立即刷新，q 結束監視。'
+  );
   if (countdownSeconds === null || countdownSeconds === undefined) {
     return controls;
   }
@@ -1422,12 +1615,7 @@ function buildWatchControlsLine(countdownSeconds, lineWidth) {
 
 function printHeader(contentWidth = null, watchOptions = {}) {
   const now = new Date();
-  const tzOffsetMinutes = -now.getTimezoneOffset();
-  const sign = tzOffsetMinutes >= 0 ? '+' : '-';
-  const abs = Math.abs(tzOffsetMinutes);
-  const nowText = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(
-    now.getHours()
-  )}:${pad(now.getMinutes())}:${pad(now.getSeconds())} ${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+  const nowText = formatDateTime(now, watchOptions.timeFormat || 'local', { withSeconds: true });
   const terminalWidth = getCurrentTerminalWidth();
   const resolvedContentWidth = contentWidth ||
     (terminalWidth ? Math.max(1, terminalWidth - 4) : USAGE_CARD_WIDTH);
@@ -1449,21 +1637,24 @@ function printHeader(contentWidth = null, watchOptions = {}) {
   );
 
   lines.forEach((line) => console.log(line));
+  if (watchOptions.renderState) {
+    watchOptions.renderState.row += lines.length;
+  }
 }
 
-function printManualResetSection(credits, layout) {
+function printManualResetSection(credits, layout, displayOptions = {}) {
   console.log(paint('bold', '手動重置額度'));
-  printCredits(credits, layout);
+  printCredits(credits, layout, displayOptions);
 }
 
-function prepareCreditCards(credits, minimumContentWidth = CREDIT_WIDTH) {
+function prepareCreditCards(credits, minimumContentWidth = CREDIT_WIDTH, displayOptions = {}) {
   const prepared = (Array.isArray(credits) ? credits : [])
     .map((credit, index) => {
       if (!credit || typeof credit !== 'object') {
         return null;
       }
 
-      const lines = getCreditCardLines(index, credit);
+      const lines = getCreditCardLines(index, credit, displayOptions);
       const contentWidth = Math.max(
         minimumContentWidth,
         CREDIT_WIDTH,
@@ -1492,12 +1683,12 @@ function prepareCreditCards(credits, minimumContentWidth = CREDIT_WIDTH) {
   };
 }
 
-function getManualResetLayout(credits) {
+function getManualResetLayout(credits, displayOptions = {}) {
   const terminalWidth = getCurrentTerminalWidth();
-  let prepared = prepareCreditCards(credits);
+  let prepared = prepareCreditCards(credits, CREDIT_WIDTH, displayOptions);
   const naturalCardOuterWidth = prepared.contentWidth + 4;
   if (prepared.cards.length === 1 && terminalWidth > naturalCardOuterWidth) {
-    prepared = prepareCreditCards(credits, terminalWidth - 4);
+    prepared = prepareCreditCards(credits, terminalWidth - 4, displayOptions);
   }
   const cardOuterWidth = prepared.contentWidth + 4;
   const twoColumns =
@@ -1515,7 +1706,7 @@ function getManualResetLayout(credits) {
   };
 }
 
-function printCredits(credits, layout = getManualResetLayout(credits)) {
+function printCredits(credits, layout = getManualResetLayout(credits), displayOptions = {}) {
   if (!layout.cards.length) {
     return;
   }
@@ -1887,6 +2078,17 @@ async function runOnce(options) {
   }
   const accountStatus = accountRequest.status === 'fulfilled' ? accountRequest.value : null;
 
+  return renderOutput(result, usage, usageRaw, usageError, accountStatus, {
+    ...options,
+    accessToken,
+    accountId,
+  });
+}
+
+function renderOutput(result, usage, usageRaw, usageError, accountStatus, options) {
+  const accessToken = options.accessToken;
+  const accountId = options.accountId;
+
   if (typeof options.beforeWatchRender === 'function') {
     options.beforeWatchRender();
   }
@@ -1917,6 +2119,8 @@ async function runOnce(options) {
       rateLimit: result,
       usage,
       usageRaw,
+      usageError,
+      accountStatus,
     };
   }
 
@@ -1928,28 +2132,35 @@ async function runOnce(options) {
         ? result.data
         : [];
 
-  const manualResetLayout = getManualResetLayout(credits);
+  const displayOptions = {
+    timeFormat: options.timeFormat || 'local',
+    exactTime: Boolean(options.exactTime),
+    renderState: options.renderState || null,
+  };
+  const manualResetLayout = getManualResetLayout(credits, displayOptions);
   const usageCards = getUsageCards(usage);
   const usageLayout = getUsageLayout(usageCards, manualResetLayout.totalWidth);
 
   printHeader(usageLayout.boxContentWidth, {
     planType: usageRaw && typeof usageRaw === 'object' ? usageRaw.plan_type : null,
     renewalAt: getSubscriptionExpiresAt(accountStatus, accountId),
+    timeFormat: displayOptions.timeFormat,
+    renderState: displayOptions.renderState,
   });
   if (usageError) {
     const message = sanitizeSensitiveText(getErrorMessage(usageError), [accessToken, accountId]);
     console.error(paint('yellow', `警告：使用額度查詢失敗，仍顯示手動重置額度。${message}`));
   }
-  printUsageSection(usage, usageLayout);
+  printUsageSection(usage, usageLayout, displayOptions);
   console.log('');
-  printManualResetSection(credits, manualResetLayout);
+  printManualResetSection(credits, manualResetLayout, displayOptions);
   if (options.watch) {
     console.log('');
     const countdownSeconds = typeof options.getWatchCountdownSeconds === 'function'
       ? options.getWatchCountdownSeconds()
       : null;
     const lineWidth = usageLayout.boxContentWidth + 4;
-    const controlsLine = buildWatchControlsLine(countdownSeconds, lineWidth);
+    const controlsLine = buildWatchControlsLine(countdownSeconds, lineWidth, true);
     console.log(controlsLine);
     if (typeof options.onWatchFooterRendered === 'function') {
       options.onWatchFooterRendered({
@@ -1962,6 +2173,8 @@ async function runOnce(options) {
     rateLimit: result,
     usage,
     usageRaw,
+    usageError,
+    accountStatus,
   };
 }
 
@@ -1969,10 +2182,17 @@ function startWatch(options, dependencies = {}) {
   const output = dependencies.output || process.stdout;
   const input = dependencies.input || process.stdin;
   const signalEmitter = dependencies.signalEmitter || process;
-  const refreshFunction = dependencies.refreshFunction || ((watchOptions) => runOnce({
-    ...options,
-    ...watchOptions,
-  }));
+  let lastRenderData = null;
+  const refreshFunction = dependencies.refreshFunction || (async (watchOptions) => {
+    const data = await runOnce({
+      ...options,
+      ...watchOptions,
+    });
+    if (data && typeof data === 'object') {
+      lastRenderData = data;
+    }
+    return data;
+  });
   const setIntervalFunction = dependencies.setIntervalFunction || setInterval;
   const clearIntervalFunction = dependencies.clearIntervalFunction || clearInterval;
   const setTimeoutFunction = dependencies.setTimeoutFunction || setTimeout;
@@ -1995,15 +2215,34 @@ function startWatch(options, dependencies = {}) {
   let inputWasFlowing = false;
   let rawModeChanged = false;
   let inputFlowingChanged = false;
+  let mouseTrackingEnabled = false;
+  let mouseInputBuffer = '';
+  let exactTimeMode = Boolean(options.exactTime);
+  const renderState = {
+    row: 0,
+    zones: [],
+  };
 
   const getCountdownSeconds = () => getWatchCountdownSeconds(nextRefreshAt, nowFunction());
+
+  const createPrepareScreen = () => {
+    let screenPrepared = false;
+    return () => {
+      if (!screenPrepared) {
+        clearTerminal(output);
+        renderState.row = 0;
+        renderState.zones.length = 0;
+        screenPrepared = true;
+      }
+    };
+  };
 
   const renderCountdown = () => {
     if (stopped || activeRefresh || !footerState || !output || typeof output.write !== 'function') {
       return;
     }
 
-    const line = buildWatchControlsLine(getCountdownSeconds(), footerState.lineWidth);
+    const line = buildWatchControlsLine(getCountdownSeconds(), footerState.lineWidth, true);
     output.write(`\x1b7\x1b[1A\x1b[2K${line}\x1b8`);
   };
 
@@ -2021,13 +2260,7 @@ function startWatch(options, dependencies = {}) {
       do {
         refreshPending = false;
         headerState = null;
-        let screenPrepared = false;
-        const prepareScreen = () => {
-          if (!screenPrepared) {
-            clearTerminal(output);
-            screenPrepared = true;
-          }
-        };
+        const prepareScreen = createPrepareScreen();
 
         try {
           await refreshFunction({
@@ -2036,6 +2269,8 @@ function startWatch(options, dependencies = {}) {
             onWatchFooterRendered: (state) => {
               footerState = state;
             },
+            exactTime: exactTimeMode,
+            renderState,
           });
         } catch (error) {
           prepareScreen();
@@ -2047,6 +2282,71 @@ function startWatch(options, dependencies = {}) {
     });
 
     return activeRefresh;
+  };
+
+  const rerenderFromCache = () => {
+    if (stopped || !lastRenderData) {
+      return Promise.resolve();
+    }
+
+    if (activeRefresh) {
+      refreshPending = true;
+      return activeRefresh;
+    }
+
+    activeRefresh = (async () => {
+      do {
+        refreshPending = false;
+        const prepareScreen = createPrepareScreen();
+
+        try {
+          renderOutput(
+            lastRenderData.rateLimit,
+            lastRenderData.usage,
+            lastRenderData.usageRaw,
+            lastRenderData.usageError,
+            lastRenderData.accountStatus,
+            {
+              ...options,
+              beforeWatchRender: prepareScreen,
+              getWatchCountdownSeconds: getCountdownSeconds,
+              onWatchFooterRendered: (state) => {
+                footerState = state;
+              },
+              exactTime: exactTimeMode,
+              renderState,
+            }
+          );
+        } catch (error) {
+          prepareScreen();
+          console.error(paint('red', `錯誤：重新繪製失敗：${getErrorMessage(error)}`));
+        }
+      } while (refreshPending && !stopped);
+    })().finally(() => {
+      activeRefresh = null;
+    });
+
+    return activeRefresh;
+  };
+
+  const handleMouseEvent = (event) => {
+    if (!event.press || event.button !== 0) {
+      return;
+    }
+
+    const hit = renderState.zones.some(
+      (zone) => zone.row === event.row && event.col >= zone.colStart && event.col <= zone.colEnd
+    );
+    if (!hit) {
+      return;
+    }
+
+    exactTimeMode = !exactTimeMode;
+    if (lastRenderData) {
+      void rerenderFromCache();
+    } else {
+      void refresh();
+    }
   };
 
   const handleResize = () => {
@@ -2096,6 +2396,9 @@ function startWatch(options, dependencies = {}) {
     if (resizeTimeoutHandle !== null) {
       clearTimeoutFunction(resizeTimeoutHandle);
     }
+    if (mouseTrackingEnabled && output && typeof output.write === 'function') {
+      output.write('\x1b[?1000l');
+    }
     if (output && typeof output.removeListener === 'function') {
       output.removeListener('resize', handleResize);
     }
@@ -2122,13 +2425,21 @@ function startWatch(options, dependencies = {}) {
   };
 
   const handleInput = (chunk) => {
-    const value = String(chunk);
-    if (value.includes('\u0003') || value.includes('q')) {
+    mouseInputBuffer += String(chunk);
+    if (mouseInputBuffer.length > MOUSE_INPUT_BUFFER_LIMIT) {
+      mouseInputBuffer = mouseInputBuffer.slice(-MOUSE_INPUT_BUFFER_LIMIT);
+    }
+
+    const { events, rest } = extractMouseEvents(mouseInputBuffer);
+    mouseInputBuffer = rest;
+    events.forEach(handleMouseEvent);
+
+    if (rest.includes('\u0003') || rest.includes('q')) {
       handleSignal();
       return;
     }
 
-    if (value.includes(' ')) {
+    if (rest.includes(' ')) {
       resetAutoRefreshTimer();
       void refresh();
     }
@@ -2147,6 +2458,10 @@ function startWatch(options, dependencies = {}) {
     if (typeof input.setRawMode === 'function' && !inputWasRaw) {
       input.setRawMode(true);
       rawModeChanged = true;
+    }
+    if (output && typeof output.write === 'function') {
+      output.write('\x1b[?1000h');
+      mouseTrackingEnabled = true;
     }
     input.on('data', handleInput);
     if (!inputWasFlowing && typeof input.resume === 'function') {
@@ -2196,7 +2511,9 @@ module.exports = {
   compareUsageDecrease,
   confirmResetUsage,
   createRedeemRequestId,
+  extractMouseEvents,
   formatCompactDurationFromSeconds,
+  formatDateTime,
   formatUsageReset,
   getAvailableResetCount,
   getCliOptions,
@@ -2210,6 +2527,7 @@ module.exports = {
   normalizeUsageResponse,
   normalizeUsageWindow,
   normalizeResetOutcome,
+  renderOutput,
   requestJson,
   requestJsonRequest,
   requestConsumeReset,

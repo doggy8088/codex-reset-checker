@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.8.0] - 2026-08-06
+
+### Added
+
+- 新增 `--time-format <local|utc|iso>` 選項（預設 `local`），可統一變更所有日期時間的顯示格式；`local` 為本機時區並附帶 `+HH:MM` 偏移，`utc` 為 UTC 時間，`iso` 為 ISO 8601。套用於標頭查詢時間、續約時間、重設時間與手動重置額度的獲得／到期日。
+- 新增 `--exact-time`（短 flag `-t`）選項，可讓額度卡片的「重設時間」預設直接顯示確切時間（`YYYY-MM-DD HH:MM +HH:MM`），而不是「約 1d 12h 23m 後重設」的倒數表示法；顯示格式仍受 `--time-format` 控制。
+- 監看模式新增滑鼠點擊支援：點擊任一張額度卡片的「重設時間」文字，可在「約 1d 13h 46m 後重設」的倒數表示法與確切本機時間（`YYYY-MM-DD HH:MM +HH:MM`）之間切換；所有卡片的重設時間會一起變更，再點一次切回。切換直接以快取畫面重繪，不會重新呼叫 API，也不會重置自動刷新計時器。
+
+### Changed
+
+- 日期時間格式化收斂至單一 `formatDateTime()`，原有 `formatShortDate`、`formatLocalTime`、`formatRenewalTime` 行為保持一致（local 格式）。
+- 監看模式操作提示列新增「點擊『重設時間』切換顯示」的提示文字。
+
 ## [0.7.2] - 2026-07-30
 
 ### Fixed

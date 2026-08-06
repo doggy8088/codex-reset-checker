@@ -340,6 +340,8 @@ async function testWatchCliOptions() {
     reset: false,
     resetRequestId: null,
     force: false,
+    timeFormat: 'local',
+    exactTime: false,
   });
   assert.deepStrictEqual(shortOption, {
     authPath: '/tmp/short-auth.json',
@@ -348,6 +350,8 @@ async function testWatchCliOptions() {
     reset: false,
     resetRequestId: null,
     force: false,
+    timeFormat: 'local',
+    exactTime: false,
   });
   assert.strictEqual(equalsOption.authPath, '/tmp/equals-auth.json');
   assert.throws(
@@ -390,6 +394,8 @@ async function testResetCliOptions() {
     reset: true,
     resetRequestId: null,
     force: false,
+    timeFormat: 'local',
+    exactTime: false,
   });
   assert.deepStrictEqual(retryOption, {
     authPath: '/tmp/retry-auth.json',
@@ -398,6 +404,8 @@ async function testResetCliOptions() {
     reset: true,
     resetRequestId: requestId,
     force: false,
+    timeFormat: 'local',
+    exactTime: false,
   });
   assert.deepStrictEqual(forceOption, {
     authPath: '/tmp/force-auth.json',
@@ -406,6 +414,8 @@ async function testResetCliOptions() {
     reset: true,
     resetRequestId: null,
     force: true,
+    timeFormat: 'local',
+    exactTime: false,
   });
   assert.deepStrictEqual(forceRetryOption, {
     authPath: '/tmp/force-retry-auth.json',
@@ -414,6 +424,8 @@ async function testResetCliOptions() {
     reset: true,
     resetRequestId: requestId,
     force: true,
+    timeFormat: 'local',
+    exactTime: false,
   });
   assert.throws(
     () => checker.getCliOptions(['--reset', '--json']),
@@ -441,6 +453,160 @@ async function testResetCliOptions() {
   );
 }
 
+async function testTimeFormatCliOptions() {
+  const equalsOption = checker.getCliOptions(['--time-format=utc', '--auth', '/tmp/auth.json']);
+  const spaceOption = checker.getCliOptions(['--time-format', 'iso', '/tmp/space-auth.json']);
+  const defaultOption = checker.getCliOptions(['/tmp/auth.json']);
+  const watchOption = checker.getCliOptions(['--watch', '--time-format=utc', '/tmp/auth.json']);
+  const exactTimeOption = checker.getCliOptions(['--exact-time', '/tmp/auth.json']);
+  const exactTimeWatchOption = checker.getCliOptions(['--watch', '--exact-time', '/tmp/auth.json']);
+  const shortExactTimeOption = checker.getCliOptions(['-t', '/tmp/short-exact-auth.json']);
+  const shortExactTimeWatchOption = checker.getCliOptions(['-w', '-t', '/tmp/short-exact-watch.json']);
+
+  assert.strictEqual(equalsOption.timeFormat, 'utc');
+  assert.strictEqual(spaceOption.timeFormat, 'iso');
+  assert.strictEqual(defaultOption.timeFormat, 'local');
+  assert.strictEqual(watchOption.timeFormat, 'utc');
+  assert.strictEqual(defaultOption.exactTime, false);
+  assert.strictEqual(exactTimeOption.exactTime, true);
+  assert.strictEqual(exactTimeWatchOption.exactTime, true);
+  assert.strictEqual(shortExactTimeOption.exactTime, true);
+  assert.strictEqual(shortExactTimeWatchOption.exactTime, true);
+  assert.strictEqual(shortExactTimeWatchOption.watch, true);
+  assert.throws(
+    () => checker.getCliOptions(['--time-format', 'cet']),
+    /--time-format 只支援 local、utc 或 iso/
+  );
+  assert.throws(
+    () => checker.getCliOptions(['--time-format']),
+    /--time-format 需要指定 local、utc 或 iso/
+  );
+  assert.throws(
+    () => checker.getCliOptions(['--time-format=utc', '--time-format', 'iso']),
+    /--time-format 只能指定一次/
+  );
+  assert.throws(
+    () => checker.getCliOptions(['--exact-time', '--exact-time']),
+    /--exact-time 只能指定一次/
+  );
+  assert.throws(
+    () => checker.getCliOptions(['-t', '--exact-time']),
+    /--exact-time 只能指定一次/
+  );
+}
+
+async function testExactTimeFlagRendersExactResetTime() {
+  const originalLog = console.log;
+  const stdout = [];
+  console.log = (value = '') => stdout.push(String(value));
+
+  try {
+    const usage = checker.normalizeUsageResponse(usageResponse());
+    const renderState = { row: 0, zones: [] };
+    checker.renderOutput(
+      { available_count: 2, credits: [] },
+      usage,
+      { plan_type: 'pro' },
+      null,
+      null,
+      {
+        watch: false,
+        timeFormat: 'local',
+        exactTime: true,
+        renderState,
+        beforeWatchRender: () => {
+          renderState.row = 0;
+          renderState.zones.length = 0;
+        },
+        getWatchCountdownSeconds: () => 60,
+        onWatchFooterRendered: () => {},
+      }
+    );
+
+    const resetLines = stdout.filter((line) => line.includes('重設時間'));
+    assert.ok(resetLines.length >= 2, '應顯示多張額度卡片');
+    resetLines.forEach((line) => {
+      assert.match(
+        line,
+        /重設時間 於 \d{4}-\d{2}-\d{2} \d{2}:\d{2} [+-]\d{2}:\d{2} 重設/,
+        '預設應顯示確切時間而非倒數'
+      );
+      assert.ok(!line.includes('約 '), '不應顯示倒數表示法');
+    });
+  } finally {
+    console.log = originalLog;
+  }
+}
+
+async function testFormatDateTimeModes() {
+  const date = new Date(Date.UTC(2026, 7, 8, 3, 52, 46));
+
+  const localSeconds = checker.formatDateTime(date, 'local', { withSeconds: true });
+  assert.match(localSeconds, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:46 [+-]\d{2}:\d{2}$/);
+  const localNoSeconds = checker.formatDateTime(date, 'local', { withSeconds: false });
+  assert.match(localNoSeconds, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} [+-]\d{2}:\d{2}$/);
+  const utc = checker.formatDateTime(date, 'utc', { withSeconds: true });
+  assert.strictEqual(utc, '2026-08-08 03:52:46 +00:00');
+  const utcNoSeconds = checker.formatDateTime(date, 'utc', { withSeconds: false });
+  assert.strictEqual(utcNoSeconds, '2026-08-08 03:52 +00:00');
+  const iso = checker.formatDateTime(date, 'iso');
+  assert.strictEqual(iso, '2026-08-08T03:52:46.000Z');
+  assert.strictEqual(checker.formatDateTime(null, 'local'), 'N/A');
+  assert.strictEqual(checker.formatDateTime('not-a-date', 'local'), 'not-a-date');
+}
+
+async function testFormatUsageResetExactTime() {
+  const now = Date.now();
+  const resetAt = Math.floor((now + 3600 * 1000) / 1000);
+  const window = { reset_at: resetAt };
+
+  const relative = checker.formatUsageReset(window);
+  assert.match(relative, /^約 1h 後重置$/);
+
+  const exact = checker.formatUsageReset(window, { exactTime: true, timeFormat: 'local' });
+  assert.match(exact, /^於 \d{4}-\d{2}-\d{2} \d{2}:\d{2} [+-]\d{2}:\d{2} 重置$/);
+
+  const exactUtc = checker.formatUsageReset(window, { exactTime: true, timeFormat: 'utc' });
+  assert.match(exactUtc, /^於 \d{4}-\d{2}-\d{2} \d{2}:\d{2} \+00:00 重置$/);
+
+  const afterSeconds = checker.formatUsageReset(
+    { reset_after_seconds: 5400 },
+    { exactTime: true, timeFormat: 'utc' }
+  );
+  assert.match(afterSeconds, /^於 \d{4}-\d{2}-\d{2} \d{2}:\d{2} \+00:00 重置$/);
+
+  const expired = checker.formatUsageReset(
+    { reset_at: Math.floor(now / 1000) - 10 },
+    { exactTime: true, timeFormat: 'local' }
+  );
+  assert.strictEqual(expired, '已到重置時間');
+}
+
+async function testExtractMouseEvents() {
+  const sgr = checker.extractMouseEvents('\x1b[<0;12;5M');
+  assert.deepStrictEqual(sgr.events, [{ button: 0, col: 12, row: 5, press: true }]);
+  assert.strictEqual(sgr.rest, '');
+
+  const release = checker.extractMouseEvents('\x1b[<0;12;5m');
+  assert.strictEqual(release.events.length, 1);
+  assert.strictEqual(release.events[0].press, false);
+
+  const x10 = checker.extractMouseEvents('\x1b[M ,%');
+  assert.deepStrictEqual(x10.events, [{ button: 0, col: 12, row: 5, press: true }]);
+
+  const multiple = checker.extractMouseEvents('\x1b[<1;3;4M\x1b[<0;9;9M');
+  assert.strictEqual(multiple.events.length, 2);
+  assert.deepStrictEqual(multiple.events[1], { button: 0, col: 9, row: 9, press: true });
+
+  const partial = checker.extractMouseEvents('\x1b[<0;12');
+  assert.deepStrictEqual(partial.events, []);
+  assert.strictEqual(partial.rest, '\x1b[<0;12');
+
+  const withKeys = checker.extractMouseEvents('\x1b[<0;12;5Mq');
+  assert.strictEqual(withKeys.events.length, 1);
+  assert.strictEqual(withKeys.rest, 'q');
+}
+
 async function testWatchRefreshesOnIntervalAndTerminalResize() {
   const output = new EventEmitter();
   const signalEmitter = new EventEmitter();
@@ -461,6 +627,7 @@ async function testWatchRefreshesOnIntervalAndTerminalResize() {
     { authPath: '/tmp/auth.json', json: false, watch: true },
     {
       output,
+      input: { isTTY: false },
       signalEmitter,
       refreshFunction: async (watchOptions) => {
         refreshEvents.push('query');
@@ -692,6 +859,169 @@ async function testWatchCountdownAndSpacebarRefresh() {
   assert.strictEqual(clearedIntervals.length, 3);
 }
 
+async function testWatchUsageZonesMatchRenderedRows() {
+  const originalColumns = process.stdout.columns;
+  const originalLog = console.log;
+  const stdout = [];
+  process.stdout.columns = 200;
+  console.log = (value = '') => stdout.push(String(value));
+
+  try {
+    const usage = checker.normalizeUsageResponse(usageResponse());
+    const renderState = { row: 0, zones: [] };
+    checker.renderOutput(
+      {
+        available_count: 2,
+        credits: [
+          { status: 'available', granted_at: '2026-07-13T00:00:00Z', expires_at: '2026-08-13T00:00:00Z' },
+          { status: 'available', granted_at: '2026-07-13T00:00:00Z', expires_at: '2026-08-13T00:00:00Z' },
+          { status: 'available', granted_at: '2026-07-13T00:00:00Z', expires_at: '2026-08-13T00:00:00Z' },
+          { status: 'available', granted_at: '2026-07-13T00:00:00Z', expires_at: '2026-08-13T00:00:00Z' },
+        ],
+      },
+      usage,
+      { plan_type: 'pro' },
+      null,
+      null,
+      {
+        watch: true,
+        timeFormat: 'local',
+        renderState,
+        beforeWatchRender: () => {
+          renderState.row = 0;
+          renderState.zones.length = 0;
+        },
+        getWatchCountdownSeconds: () => 60,
+        onWatchFooterRendered: () => {},
+      }
+    );
+
+    const resetRows = [];
+    stdout.forEach((line, index) => {
+      if (line.includes('重設時間') && !line.includes('切換顯示')) {
+        resetRows.push(index + 1);
+      }
+    });
+
+    assert.ok(resetRows.length >= 2, '畫面上應有多個重設時間列');
+    renderState.zones.forEach((zone) => {
+      assert.ok(resetRows.includes(zone.row), `zone row ${zone.row} 應對應實際的重設時間列`);
+    });
+    assert.strictEqual(
+      new Set(renderState.zones.map((zone) => zone.row)).size,
+      resetRows.length,
+      '每個重設時間列都應有對應的點擊命中區'
+    );
+  } finally {
+    console.log = originalLog;
+    if (originalColumns === undefined) {
+      delete process.stdout.columns;
+    } else {
+      process.stdout.columns = originalColumns;
+    }
+  }
+}
+
+async function testWatchMouseClickTogglesResetTime() {  const auth = createAuthFile();
+  const originalLog = console.log;
+  const output = new EventEmitter();
+  const input = new EventEmitter();
+  const signalEmitter = new EventEmitter();
+  const writes = [];
+  const intervals = [];
+  const clearedIntervals = [];
+  const stdout = [];
+  output.columns = 120;
+  output.rows = 40;
+  output.isTTY = true;
+  output.write = (value) => writes.push(String(value));
+  input.isTTY = true;
+  input.isRaw = false;
+  input.readableFlowing = null;
+  input.isPaused = () => true;
+  input.setRawMode = () => {
+    input.isRaw = true;
+  };
+  input.resume = () => {};
+  input.pause = () => {};
+  console.log = (value = '') => stdout.push(String(value));
+
+  try {
+    await withFakeHttps(
+      {
+        '/backend-api/wham/rate-limit-reset-credits': {
+          body: { available_count: 2, credits: [] },
+        },
+        '/backend-api/wham/usage': { body: usageResponse() },
+        '/backend-api/accounts/check/v4-2023-04-27': { body: {} },
+      },
+      async () => {
+        const watcher = checker.startWatch(
+          { authPath: auth.authPath, json: false, watch: true },
+          {
+            output,
+            input,
+            signalEmitter,
+            setIntervalFunction: (callback, delay) => {
+              const handle = { callback, delay };
+              intervals.push(handle);
+              return handle;
+            },
+            clearIntervalFunction: (handle) => clearedIntervals.push(handle),
+          }
+        );
+
+        await watcher.ready;
+
+        assert.ok(writes.some((value) => value === '\x1b[?1000h'), '應啟用滑鼠追蹤');
+        const firstRenderLength = stdout.length;
+        assert.ok(stdout.some((line) => line.includes('約 2h 15m 後重設')));
+
+        const resetLineIndex = stdout.findIndex((line) => line.includes('重設時間'));
+        assert.ok(resetLineIndex >= 0, '畫面上應有重設時間行');
+        const zoneRow = resetLineIndex + 1;
+
+        input.emit('data', Buffer.from('\x1b[<0;5;1M'));
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.strictEqual(
+          stdout.length,
+          firstRenderLength,
+          '點擊非重設時間位置不應重繪'
+        );
+
+        input.emit('data', Buffer.from(`\x1b[<0;5;${zoneRow}M`));
+        await new Promise((resolve) => setImmediate(resolve));
+        const secondRender = stdout.slice(firstRenderLength);
+        assert.ok(secondRender.length > 0, '點擊重設時間應重繪畫面');
+        assert.ok(
+          secondRender.some((line) => /^│ 重設時間 .* \d{4}-\d{2}-\d{2} \d{2}:\d{2} [+-]\d{2}:\d{2} 重設 +│$/.test(line)),
+          '切換後應顯示確切當地時間'
+        );
+        assert.ok(
+          secondRender.some((line) => line.includes('重設時間')),
+          '切換後仍有重設時間行'
+        );
+        assert.ok(!secondRender.join('\n').includes('約 2h 15m 後重設'), '切換後不應再顯示倒數');
+
+        const secondRenderLength = stdout.length;
+        input.emit('data', Buffer.from(`\x1b[<0;5;${zoneRow}M`));
+        await new Promise((resolve) => setImmediate(resolve));
+        const thirdRender = stdout.slice(secondRenderLength);
+        assert.ok(
+          thirdRender.some((line) => line.includes('約 2h 15m 後重設')),
+          '再次點擊應切回倒數顯示'
+        );
+
+        watcher.stop();
+        assert.ok(writes.some((value) => value === '\x1b[?1000l'), '結束時應停用滑鼠追蹤');
+      }
+    );
+  } finally {
+    console.log = originalLog;
+    auth.cleanup();
+  }
+}
+
 async function testWatchHumanOutputEndsWithControls() {
   const auth = createAuthFile();
   const originalLog = console.log;
@@ -726,7 +1056,8 @@ async function testWatchHumanOutputEndsWithControls() {
 
     assert.ok(output.some((line) => line.includes('方案：Pro')));
     assert.ok(output.some((line) => line.includes('續約時間：2026-08-15 00:00')));
-    assert.ok(output[output.length - 1].includes('Spacebar 立即刷新，q 結束監視。'));
+    assert.ok(output[output.length - 1].includes('Spacebar 立即刷新，q 結束監視'));
+    assert.ok(output[output.length - 1].includes('點擊「重設時間」切換顯示'));
     assert.ok(output[output.length - 1].includes('下次刷新：60 秒'));
   } finally {
     console.log = originalLog;
@@ -1432,10 +1763,17 @@ const tests = [
   ['單筆手動重置額度使用完整終端機寬度', testSingleManualResetUsesFullTerminalWidth],
   ['watch CLI 長短選項皆可解析', testWatchCliOptions],
   ['reset CLI 選項、冪等鍵與互斥組合可正確解析', testResetCliOptions],
+  ['--time-format 選項可解析並驗證取值', testTimeFormatCliOptions],
+  ['--exact-time 預設以確切時間顯示重設時間', testExactTimeFlagRendersExactResetTime],
+  ['日期時間依 local/utc/iso 格式顯示', testFormatDateTimeModes],
+  ['重設時間可切換為確切時間顯示', testFormatUsageResetExactTime],
+  ['滑鼠事件可解析 SGR 與 X10 格式', testExtractMouseEvents],
   ['watch 每分鐘與終端機尺寸變更時刷新', testWatchRefreshesOnIntervalAndTerminalResize],
   ['watch 刷新不會重疊輸出', testWatchQueuesRefreshWithoutOverlappingOutput],
   ['watch 單次刷新失敗後仍會繼續', testWatchContinuesAfterRefreshFailure],
   ['watch 顯示倒數、Spacebar 無空白等待刷新並可以 q 結束', testWatchCountdownAndSpacebarRefresh],
+  ['watch 滑鼠點擊重設時間可在倒數與確切時間間切換', testWatchMouseClickTogglesResetTime],
+  ['watch 點擊命中區對應實際重設時間列', testWatchUsageZonesMatchRenderedRows],
   ['watch 輸出最後一行顯示操作提示', testWatchHumanOutputEndsWithControls],
   ['兩個端點共用標頭且路徑正確', testRequestsReuseHeadersAndEndpoints],
   ['reset 成功時以 POST 傳送 UUID 並重新查詢', testResetSuccessPostsUuidAndRefetchesUsage],
