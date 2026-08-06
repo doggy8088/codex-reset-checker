@@ -5,6 +5,7 @@ on:
     branches:
       - main
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -207,7 +208,7 @@ jobs:
 
       - name: Publish package to npm
         if: steps.release.outputs.release_state != 'published' && steps.npm.outputs.published != 'true'
-        run: npm publish
+        run: npm publish --provenance --access public
 
       - name: Publish GitHub Release
         if: steps.release.outputs.release_state != 'published'
