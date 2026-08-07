@@ -66,7 +66,7 @@ jobs:
           CURRENT_VERSION="$(node -p "require('./package.json').version")"
           PREVIOUS_VERSION=""
 
-          if git cat-file -e "$BEFORE_SHA:package.json" 2>/dev/null; then
+          if [ -n "$BEFORE_SHA" ] && git cat-file -e "$BEFORE_SHA:package.json" 2>/dev/null; then
             PREVIOUS_VERSION="$(
               git show "$BEFORE_SHA:package.json" |
                 node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).version'
