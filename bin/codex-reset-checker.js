@@ -1710,6 +1710,7 @@ function getManualResetLayout(credits, displayOptions = {}) {
 
 function printCredits(credits, layout = getManualResetLayout(credits), displayOptions = {}) {
   if (!layout.cards.length) {
+    printNoCreditsBox(layout);
     return;
   }
 
@@ -1719,6 +1720,20 @@ function printCredits(credits, layout = getManualResetLayout(credits), displayOp
   }
 
   printCreditCardsInSingleColumn(layout.cards);
+}
+
+function printNoCreditsBox(layout) {
+  const contentWidth = Math.max(CREDIT_WIDTH, layout.totalWidth - 4);
+  const message = paint('dim', '目前沒有可用的手動重置額度');
+  const padding = Math.max(0, contentWidth - textDisplayWidth(message));
+  const leftPad = Math.floor(padding / 2);
+  const rightPad = padding - leftPad;
+  const top = `┌${'─'.repeat(contentWidth + 2)}┐`;
+  const bottom = `└${'─'.repeat(contentWidth + 2)}┘`;
+
+  console.log(paint('bold', top));
+  console.log(`│ ${' '.repeat(leftPad)}${message}${' '.repeat(rightPad)} │`);
+  console.log(paint('bold', bottom));
 }
 
 function createRedeemRequestId(randomUUIDFunction = crypto.randomUUID) {

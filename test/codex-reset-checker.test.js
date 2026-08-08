@@ -1786,6 +1786,58 @@ async function testHumanOutputSeparatesBothCreditTypes() {
   }
 }
 
+async function testNoCreditsShowsEmptyBoxMessage() {
+  const auth = createAuthFile();
+
+  try {
+    const captured = await captureMain(
+      ['--auth', auth.authPath],
+      {
+        '/backend-api/wham/rate-limit-reset-credits': {
+          body: { available_count: 0, credits: [] },
+        },
+        '/backend-api/wham/usage': { body: usageResponse() },
+      }
+    );
+
+    const output = captured.stdout.join('\n');
+    const outputLines = output.split('\n');
+    assert.ok(output.includes('手動重置額度'));
+    assert.ok(output.includes('目前沒有可用的手動重置額度'));
+    const boxTopIndex = outputLines.findIndex((line) => line.startsWith('┌'));
+    assert.ok(boxTopIndex >= 0);
+    assert.ok(outputLines[boxTopIndex].endsWith('┐'));
+    assert.ok(outputLines[boxTopIndex + 2].startsWith('└'));
+    const stripAnsi = (line) => line.replace(/\x1b\[[0-9;]*m/g, '');
+    const displayWidth = (line) => {
+      let width = 0;
+      for (const char of stripAnsi(line)) {
+        const codePoint = char.codePointAt(0);
+        const isWideChar =
+          (codePoint >= 0x1100 && codePoint <= 0x115f) ||
+          (codePoint >= 0x2e80 && codePoint <= 0xa4cf) ||
+          (codePoint >= 0xac00 && codePoint <= 0xd7a3) ||
+          (codePoint >= 0xf900 && codePoint <= 0xfaff) ||
+          (codePoint >= 0xfe10 && codePoint <= 0xfe19) ||
+          (codePoint >= 0xfe30 && codePoint <= 0xfe6f) ||
+          (codePoint >= 0xff00 && codePoint <= 0xff60) ||
+          (codePoint >= 0xffe0 && codePoint <= 0xffe6) ||
+          (codePoint >= 0x20000 && codePoint <= 0x2fffd) ||
+          (codePoint >= 0x30000 && codePoint <= 0x3fffd);
+        width += isWideChar ? 2 : 1;
+      }
+      return width;
+    };
+    assert.strictEqual(
+      displayWidth(outputLines[boxTopIndex]),
+      displayWidth(outputLines[boxTopIndex + 1]),
+      '框線與訊息行顯示寬度應一致'
+    );
+  } finally {
+    auth.cleanup();
+  }
+}
+
 const tests = [
   ['完整使用額度回應可標準化', testNormalizeCompleteUsage],
   ['只有 primary window 的每週額度可正確辨識', testNormalizeWeeklyOnlyPrimaryWindow],
@@ -1824,6 +1876,7 @@ const tests = [
   ['JSON API 回應中的敏感值會被遮罩', testJsonOutputMasksSensitiveValuesFromApiResponse],
   ['使用額度失敗時仍顯示人類可讀的手動額度', testUsageFailureKeepsHumanManualOutput],
   ['終端輸出分開顯示兩類額度', testHumanOutputSeparatesBothCreditTypes],
+  ['零筆手動重置額度顯示空狀態框與訊息', testNoCreditsShowsEmptyBoxMessage],
 ];
 
 async function run() {
