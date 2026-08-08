@@ -1,6 +1,6 @@
 {
   "name": "@willh/codex-reset-checker",
-  "version": "0.8.4",
+  "version": "0.9.0",
   "description": "Query Codex/ChatGPT usage limits and redeem a manual reset credit with confirmation or an explicit force flag.",
   "author": "Will 保哥",
   "repository": {
