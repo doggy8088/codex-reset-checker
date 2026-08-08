@@ -15,7 +15,7 @@ const USAGE_API_URL = 'https://chatgpt.com/backend-api/wham/usage';
 const COLOR = process.stdout && process.stdout.isTTY && !process.env.NO_COLOR;
 const CREDIT_WIDTH = 54;
 const CREDIT_GAP = 2;
-const EMPTY_CREDITS_BOX_MAX_WIDTH = 80;
+const MAX_LAYOUT_WIDTH = 80;
 const WATCH_INTERVAL_MS = 60_000;
 const RESIZE_DEBOUNCE_MS = 100;
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -1686,18 +1686,21 @@ function prepareCreditCards(credits, minimumContentWidth = CREDIT_WIDTH, display
 
 function getManualResetLayout(credits, displayOptions = {}) {
   const terminalWidth = getCurrentTerminalWidth();
+  const cappedTerminalWidth = terminalWidth > 0
+    ? Math.min(terminalWidth, MAX_LAYOUT_WIDTH)
+    : 0;
   let prepared = prepareCreditCards(credits, CREDIT_WIDTH, displayOptions);
   const naturalCardOuterWidth = prepared.contentWidth + 4;
-  if (prepared.cards.length === 1 && terminalWidth > naturalCardOuterWidth) {
-    prepared = prepareCreditCards(credits, terminalWidth - 4, displayOptions);
+  if (prepared.cards.length === 1 && cappedTerminalWidth > naturalCardOuterWidth) {
+    prepared = prepareCreditCards(credits, cappedTerminalWidth - 4, displayOptions);
   }
   const cardOuterWidth = prepared.contentWidth + 4;
   const twoColumns =
-    prepared.cards.length >= 2 && terminalWidth >= cardOuterWidth * 2 + CREDIT_GAP;
+    prepared.cards.length >= 2 && cappedTerminalWidth >= cardOuterWidth * 2 + CREDIT_GAP;
   const totalWidth = twoColumns
     ? cardOuterWidth * 2 + CREDIT_GAP
-    : prepared.cards.length === 0 && terminalWidth > 0
-      ? Math.min(terminalWidth, EMPTY_CREDITS_BOX_MAX_WIDTH)
+    : prepared.cards.length === 0 && cappedTerminalWidth > 0
+      ? cappedTerminalWidth
       : cardOuterWidth;
 
   return {
@@ -1726,7 +1729,7 @@ function printCredits(credits, layout = getManualResetLayout(credits), displayOp
 function printNoCreditsBox(layout) {
   const contentWidth = Math.max(
     CREDIT_WIDTH,
-    Math.min(layout.totalWidth, EMPTY_CREDITS_BOX_MAX_WIDTH) - 4
+    Math.min(layout.totalWidth, MAX_LAYOUT_WIDTH) - 4
   );
   const message = paint('dim', '目前沒有可用的手動重置額度');
   const padding = Math.max(0, contentWidth - textDisplayWidth(message));

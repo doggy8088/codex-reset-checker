@@ -309,7 +309,7 @@ async function testZeroManualResetLayoutCapsAtMaxWidth() {
   }
 }
 
-async function testSingleManualResetUsesFullTerminalWidth() {
+async function testSingleManualResetUsesMaxWidth() {
   const originalColumns = process.stdout.columns;
   process.stdout.columns = 120;
 
@@ -326,12 +326,12 @@ async function testSingleManualResetUsesFullTerminalWidth() {
       { title: '每週用量上限' },
     ], manualLayout.totalWidth);
 
-    assert.strictEqual(manualLayout.contentWidth, 116);
-    assert.strictEqual(manualLayout.totalWidth, 120);
-    assert.strictEqual(manualLayout.boxContentWidth, 116);
+    assert.strictEqual(manualLayout.contentWidth, 76);
+    assert.strictEqual(manualLayout.totalWidth, 80);
+    assert.strictEqual(manualLayout.boxContentWidth, 76);
     assert.strictEqual(manualLayout.twoColumns, false);
-    assert.strictEqual(usageLayout.boxContentWidth, 116);
-    assert.strictEqual(usageLayout.twoColumns, true);
+    assert.strictEqual(usageLayout.boxContentWidth, 76);
+    assert.strictEqual(usageLayout.twoColumns, false);
   } finally {
     if (originalColumns === undefined) {
       delete process.stdout.columns;
@@ -1877,7 +1877,7 @@ const tests = [
   ['只有 primary window 的每週額度可正確辨識', testNormalizeWeeklyOnlyPrimaryWindow],
   ['缺少或 null 欄位不會讓解析失敗', testNormalizeMissingAndNullWindowFields],
   ['零筆手動重置額度版面限制在最大寬度', testZeroManualResetLayoutCapsAtMaxWidth],
-  ['單筆手動重置額度使用完整終端機寬度', testSingleManualResetUsesFullTerminalWidth],
+  ['單筆手動重置額度版面限制在最大寬度', testSingleManualResetUsesMaxWidth],
   ['watch CLI 長短選項皆可解析', testWatchCliOptions],
   ['reset CLI 選項、冪等鍵與互斥組合可正確解析', testResetCliOptions],
   ['--time-format 選項可解析並驗證取值', testTimeFormatCliOptions],
