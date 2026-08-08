@@ -295,11 +295,11 @@ async function testZeroManualResetLayoutCapsAtMaxWidth() {
       { title: '每週用量上限' },
     ], manualLayout.totalWidth);
 
-    assert.strictEqual(manualLayout.totalWidth, 80);
-    assert.strictEqual(manualLayout.boxContentWidth, 76);
+    assert.strictEqual(manualLayout.totalWidth, 100);
+    assert.strictEqual(manualLayout.boxContentWidth, 96);
     assert.strictEqual(manualLayout.twoColumns, false);
-    assert.strictEqual(usageLayout.boxContentWidth, 76);
-    assert.strictEqual(usageLayout.twoColumns, false);
+    assert.strictEqual(usageLayout.boxContentWidth, 96);
+    assert.strictEqual(usageLayout.twoColumns, true);
   } finally {
     if (originalColumns === undefined) {
       delete process.stdout.columns;
@@ -326,12 +326,12 @@ async function testSingleManualResetUsesMaxWidth() {
       { title: '每週用量上限' },
     ], manualLayout.totalWidth);
 
-    assert.strictEqual(manualLayout.contentWidth, 76);
-    assert.strictEqual(manualLayout.totalWidth, 80);
-    assert.strictEqual(manualLayout.boxContentWidth, 76);
+    assert.strictEqual(manualLayout.contentWidth, 96);
+    assert.strictEqual(manualLayout.totalWidth, 100);
+    assert.strictEqual(manualLayout.boxContentWidth, 96);
     assert.strictEqual(manualLayout.twoColumns, false);
-    assert.strictEqual(usageLayout.boxContentWidth, 76);
-    assert.strictEqual(usageLayout.twoColumns, false);
+    assert.strictEqual(usageLayout.boxContentWidth, 96);
+    assert.strictEqual(usageLayout.twoColumns, true);
   } finally {
     if (originalColumns === undefined) {
       delete process.stdout.columns;
@@ -1862,7 +1862,7 @@ async function testNoCreditsBoxCapsAtMaxWidth() {
     const boxTopIndex = lines.findIndex((line) => line.startsWith('┌'));
     assert.ok(boxTopIndex >= 0);
     const stripAnsi = (line) => line.replace(/\x1b\[[0-9;]*m/g, '');
-    assert.strictEqual(stripAnsi(lines[boxTopIndex]).length, 80, '空狀態框應限制在 80 欄');
+    assert.strictEqual(stripAnsi(lines[boxTopIndex]).length, 100, '空狀態框應限制在 100 欄');
   } finally {
     if (originalColumns === undefined) {
       delete process.stdout.columns;
