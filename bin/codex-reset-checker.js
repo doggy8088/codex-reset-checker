@@ -2105,6 +2105,7 @@ function renderOutput(result, usage, usageRaw, usageError, accountStatus, option
       ...result,
       usage,
       usage_raw: usageRaw,
+      account_status: accountStatus,
     };
 
     if (usageError) {

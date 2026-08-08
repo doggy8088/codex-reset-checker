@@ -1626,6 +1626,14 @@ async function testUsageHttpFailuresKeepManualJsonAndMaskToken() {
 async function testSuccessfulJsonKeepsRawUsageAndAddsNormalizedUsage() {
   const auth = createAuthFile();
   const rawUsage = usageResponse();
+  const accountStatus = {
+    accounts: {
+      'account-secret': {
+        account: { account_id: 'account-secret' },
+        entitlement: { expires_at: 1762147153 },
+      },
+    },
+  };
 
   try {
     const captured = await captureMain(
@@ -1635,11 +1643,21 @@ async function testSuccessfulJsonKeepsRawUsageAndAddsNormalizedUsage() {
           body: { available_count: 2, credits: [] },
         },
         '/backend-api/wham/usage': { body: rawUsage },
+        '/backend-api/accounts/check/v4-2023-04-27': { body: accountStatus },
       }
     );
 
     const output = JSON.parse(captured.stdout[0]);
     assert.deepStrictEqual(output.usage_raw, rawUsage);
+    // account_status 中的 account_id 會被遮罩為 [已隱藏]
+    assert.deepStrictEqual(output.account_status, {
+      accounts: {
+        '[已隱藏]': {
+          account: { account_id: '[已隱藏]' },
+          entitlement: { expires_at: 1762147153 },
+        },
+      },
+    });
     assert.strictEqual(output.usage.primary_window.name, '目前工作階段');
     assert.strictEqual(output.usage.primary_window.used_percent, 42);
     assert.strictEqual(output.usage.primary_window.remaining_percent, 58);

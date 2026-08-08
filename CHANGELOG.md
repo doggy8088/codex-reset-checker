@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.8.1] - 2026-08-09
+
+### Added
+
+- `--json` 輸出新增 `account_status` 欄位，保留 `/accounts/check` 端點的原始回應（含續約時間）。
+
 ## [0.8.0] - 2026-08-06
 
 ### Added
