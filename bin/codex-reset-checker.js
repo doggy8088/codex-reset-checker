@@ -15,6 +15,7 @@ const USAGE_API_URL = 'https://chatgpt.com/backend-api/wham/usage';
 const COLOR = process.stdout && process.stdout.isTTY && !process.env.NO_COLOR;
 const CREDIT_WIDTH = 54;
 const CREDIT_GAP = 2;
+const EMPTY_CREDITS_BOX_MAX_WIDTH = 80;
 const WATCH_INTERVAL_MS = 60_000;
 const RESIZE_DEBOUNCE_MS = 100;
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -1723,7 +1724,10 @@ function printCredits(credits, layout = getManualResetLayout(credits), displayOp
 }
 
 function printNoCreditsBox(layout) {
-  const contentWidth = Math.max(CREDIT_WIDTH, layout.totalWidth - 4);
+  const contentWidth = Math.max(
+    CREDIT_WIDTH,
+    Math.min(layout.totalWidth, EMPTY_CREDITS_BOX_MAX_WIDTH) - 4
+  );
   const message = paint('dim', '目前沒有可用的手動重置額度');
   const padding = Math.max(0, contentWidth - textDisplayWidth(message));
   const leftPad = Math.floor(padding / 2);

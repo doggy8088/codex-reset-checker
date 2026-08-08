@@ -1838,6 +1838,40 @@ async function testNoCreditsShowsEmptyBoxMessage() {
   }
 }
 
+async function testNoCreditsBoxCapsAtMaxWidth() {
+  const originalColumns = process.stdout.columns;
+  process.stdout.columns = 120;
+
+  try {
+    const lines = [];
+    const originalLog = console.log;
+    console.log = (value = '') => lines.push(String(value));
+    try {
+      checker.renderOutput(
+        { available_count: 0, credits: [] },
+        null,
+        null,
+        null,
+        null,
+        { json: false, timeFormat: 'local', exactTime: false, renderState: null }
+      );
+    } finally {
+      console.log = originalLog;
+    }
+
+    const boxTopIndex = lines.findIndex((line) => line.startsWith('┌'));
+    assert.ok(boxTopIndex >= 0);
+    const stripAnsi = (line) => line.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.strictEqual(stripAnsi(lines[boxTopIndex]).length, 80, '空狀態框應限制在 80 欄');
+  } finally {
+    if (originalColumns === undefined) {
+      delete process.stdout.columns;
+    } else {
+      process.stdout.columns = originalColumns;
+    }
+  }
+}
+
 const tests = [
   ['完整使用額度回應可標準化', testNormalizeCompleteUsage],
   ['只有 primary window 的每週額度可正確辨識', testNormalizeWeeklyOnlyPrimaryWindow],
@@ -1877,6 +1911,7 @@ const tests = [
   ['使用額度失敗時仍顯示人類可讀的手動額度', testUsageFailureKeepsHumanManualOutput],
   ['終端輸出分開顯示兩類額度', testHumanOutputSeparatesBothCreditTypes],
   ['零筆手動重置額度顯示空狀態框與訊息', testNoCreditsShowsEmptyBoxMessage],
+  ['空狀態框寬度上限為 80 欄', testNoCreditsBoxCapsAtMaxWidth],
 ];
 
 async function run() {
