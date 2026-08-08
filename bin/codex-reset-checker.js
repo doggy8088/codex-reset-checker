@@ -1695,7 +1695,9 @@ function getManualResetLayout(credits, displayOptions = {}) {
     prepared.cards.length >= 2 && terminalWidth >= cardOuterWidth * 2 + CREDIT_GAP;
   const totalWidth = twoColumns
     ? cardOuterWidth * 2 + CREDIT_GAP
-    : cardOuterWidth;
+    : prepared.cards.length === 0 && terminalWidth > 0
+      ? terminalWidth
+      : cardOuterWidth;
 
   return {
     ...prepared,

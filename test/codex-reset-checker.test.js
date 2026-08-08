@@ -284,16 +284,29 @@ async function testNormalizeWeeklyOnlyPrimaryWindow() {
   assert.strictEqual(cards[1].title, 'GPT-5.3-Codex-Spark 每週用量上限');
 }
 
-async function testUsageLayoutUsesManualResetWidthCap() {
-  const manualLayout = checker.getManualResetLayout([]);
-  const usageLayout = checker.getUsageLayout([
-    { title: '5 小時使用情況限制' },
-    { title: '每週用量上限' },
-  ], manualLayout.totalWidth);
+async function testZeroManualResetUsesFullTerminalWidth() {
+  const originalColumns = process.stdout.columns;
+  process.stdout.columns = 120;
 
-  assert.strictEqual(manualLayout.totalWidth, 58);
-  assert.strictEqual(usageLayout.boxContentWidth, 54);
-  assert.strictEqual(usageLayout.twoColumns, false);
+  try {
+    const manualLayout = checker.getManualResetLayout([]);
+    const usageLayout = checker.getUsageLayout([
+      { title: '5 小時使用情況限制' },
+      { title: '每週用量上限' },
+    ], manualLayout.totalWidth);
+
+    assert.strictEqual(manualLayout.totalWidth, 120);
+    assert.strictEqual(manualLayout.boxContentWidth, 116);
+    assert.strictEqual(manualLayout.twoColumns, false);
+    assert.strictEqual(usageLayout.boxContentWidth, 116);
+    assert.strictEqual(usageLayout.twoColumns, true);
+  } finally {
+    if (originalColumns === undefined) {
+      delete process.stdout.columns;
+    } else {
+      process.stdout.columns = originalColumns;
+    }
+  }
 }
 
 async function testSingleManualResetUsesFullTerminalWidth() {
@@ -1777,7 +1790,7 @@ const tests = [
   ['完整使用額度回應可標準化', testNormalizeCompleteUsage],
   ['只有 primary window 的每週額度可正確辨識', testNormalizeWeeklyOnlyPrimaryWindow],
   ['缺少或 null 欄位不會讓解析失敗', testNormalizeMissingAndNullWindowFields],
-  ['使用額度寬度受手動重置額度限制', testUsageLayoutUsesManualResetWidthCap],
+  ['零筆手動重置額度使用完整終端機寬度', testZeroManualResetUsesFullTerminalWidth],
   ['單筆手動重置額度使用完整終端機寬度', testSingleManualResetUsesFullTerminalWidth],
   ['watch CLI 長短選項皆可解析', testWatchCliOptions],
   ['reset CLI 選項、冪等鍵與互斥組合可正確解析', testResetCliOptions],
