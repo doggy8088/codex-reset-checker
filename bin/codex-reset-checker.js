@@ -869,6 +869,10 @@ function normalizeAdditionalRateLimitName(value, id) {
     return 'GPT-5.3-Codex-Spark';
   }
 
+  if (identity.includes('reserve')) {
+    return 'gpt-reserve';
+  }
+
   return rawName || id;
 }
 
@@ -883,13 +887,23 @@ function normalizeAdditionalRateLimits(response) {
       const id = rawId === null || rawId === undefined || rawId === ''
         ? `additional-${index + 1}`
         : String(rawId);
-      const name = normalizeAdditionalRateLimitName(
-        getFirstValue(limit, ['display_name', 'title', 'name', 'limit_name', 'metered_limit_name']),
-        id
-      );
-      const identity = `${id} ${name}`.toLowerCase();
-      const isWeekly = identity.includes('weekly') || identity.includes('secondary');
+      const rawDisplayName = getFirstValue(limit, [
+        'display_name',
+        'title',
+        'name',
+        'limit_name',
+        'metered_limit_name',
+      ]);
+      const name = normalizeAdditionalRateLimitName(rawDisplayName, id);
+      const identity = `${id} ${rawDisplayName || ''} ${name}`.toLowerCase();
       const directWindow = getAdditionalRateLimitDirectWindow(limit);
+      const directWindowSeconds = directWindow
+        ? normalizeNonNegativeNumber(directWindow.limit_window_seconds)
+        : null;
+      const isWeekly = identity.includes('weekly')
+        || identity.includes('secondary')
+        || identity.includes('reserve')
+        || (directWindowSeconds !== null && directWindowSeconds >= 6 * 24 * 60 * 60);
       let primarySource = getAdditionalRateLimitWindow(limit, 'primary_window');
       let secondarySource = getAdditionalRateLimitWindow(limit, 'secondary_window');
 
@@ -901,11 +915,13 @@ function normalizeAdditionalRateLimits(response) {
         }
       }
 
+      const primaryFallback = isWeekly ? '每週額度' : '目前工作階段';
+
       return {
         id,
         name,
         primary_window: primarySource
-          ? normalizeUsageWindow(primarySource, '目前工作階段')
+          ? normalizeUsageWindow(primarySource, primaryFallback)
           : null,
         secondary_window: secondarySource
           ? normalizeUsageWindow(secondarySource, '每週額度')
@@ -2549,6 +2565,8 @@ module.exports = {
   getUsageCards,
   getUsageLayout,
   main,
+  normalizeAdditionalRateLimitName,
+  normalizeAdditionalRateLimits,
   normalizeUsageResponse,
   normalizeUsageWindow,
   normalizeResetOutcome,

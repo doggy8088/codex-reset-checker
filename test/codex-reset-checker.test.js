@@ -284,6 +284,100 @@ async function testNormalizeWeeklyOnlyPrimaryWindow() {
   assert.strictEqual(cards[1].title, 'GPT-5.3-Codex-Spark 每週用量上限');
 }
 
+async function testNormalizeGptReserveWeeklyLimit() {
+  const normalized = checker.normalizeUsageResponse({
+    rate_limit: {
+      primary_window: {
+        used_percent: 10,
+        limit_window_seconds: 18000,
+        reset_after_seconds: 7200,
+        reset_at: 1784500000,
+      },
+      secondary_window: {
+        used_percent: 20,
+        limit_window_seconds: 604800,
+        reset_after_seconds: 300000,
+        reset_at: 1784504427,
+      },
+    },
+    additional_rate_limits: [
+      {
+        limit_name: 'gpt-reserve',
+        display_name: 'gpt-reserve Weekly limit',
+        primary_window: {
+          used_percent: 5,
+          limit_window_seconds: 604800,
+          reset_after_seconds: 400000,
+          reset_at: 1784504432,
+        },
+        secondary_window: null,
+      },
+    ],
+  });
+
+  assert.strictEqual(normalized.additional_rate_limits.length, 1);
+  assert.strictEqual(normalized.additional_rate_limits[0].id, 'gpt-reserve');
+  assert.strictEqual(normalized.additional_rate_limits[0].name, 'gpt-reserve');
+  assert.strictEqual(normalized.additional_rate_limits[0].primary_window.name, '每週額度');
+  assert.strictEqual(normalized.additional_rate_limits[0].primary_window.used_percent, 5);
+  assert.strictEqual(normalized.additional_rate_limits[0].primary_window.remaining_percent, 95);
+
+  const cards = checker.getUsageCards(normalized);
+  assert.strictEqual(cards.length, 3);
+  assert.strictEqual(cards[0].title, '5 小時使用情況限制');
+  assert.strictEqual(cards[1].title, '每週用量上限');
+  assert.strictEqual(cards[2].title, 'gpt-reserve 每週用量上限');
+}
+
+async function testNormalizeGptReserveVariousFormats() {
+  const directNormalized = checker.normalizeUsageResponse({
+    rate_limit: {
+      primary_window: null,
+      secondary_window: null,
+    },
+    additional_rate_limits: [
+      {
+        limit_name: 'gpt-reserve',
+        display_name: 'gpt-reserve Weekly limit',
+        used_percent: 15,
+        reset_after_seconds: 86400,
+        reset_at: 1784500000,
+      },
+    ],
+  });
+
+  assert.strictEqual(directNormalized.additional_rate_limits[0].name, 'gpt-reserve');
+  assert.strictEqual(directNormalized.additional_rate_limits[0].primary_window, null);
+  assert.strictEqual(directNormalized.additional_rate_limits[0].secondary_window.name, '每週額度');
+  assert.strictEqual(directNormalized.additional_rate_limits[0].secondary_window.used_percent, 15);
+  const directCards = checker.getUsageCards(directNormalized);
+  assert.strictEqual(directCards[0].title, 'gpt-reserve 每週用量上限');
+
+  const dictNormalized = checker.normalizeUsageResponse({
+    rate_limit: {
+      primary_window: null,
+      secondary_window: null,
+    },
+    additional_rate_limits: {
+      'gpt-reserve': {
+        display_name: 'gpt-reserve Weekly limit',
+        secondary_window: {
+          used_percent: 30,
+          limit_window_seconds: 604800,
+          reset_after_seconds: 120000,
+          reset_at: 1784500000,
+        },
+      },
+    },
+  });
+
+  assert.strictEqual(dictNormalized.additional_rate_limits[0].id, 'gpt-reserve');
+  assert.strictEqual(dictNormalized.additional_rate_limits[0].name, 'gpt-reserve');
+  assert.strictEqual(dictNormalized.additional_rate_limits[0].secondary_window.used_percent, 30);
+  const dictCards = checker.getUsageCards(dictNormalized);
+  assert.strictEqual(dictCards[0].title, 'gpt-reserve 每週用量上限');
+}
+
 async function testZeroManualResetLayoutCapsAtMaxWidth() {
   const originalColumns = process.stdout.columns;
   process.stdout.columns = 120;
@@ -1875,6 +1969,8 @@ async function testNoCreditsBoxCapsAtMaxWidth() {
 const tests = [
   ['完整使用額度回應可標準化', testNormalizeCompleteUsage],
   ['只有 primary window 的每週額度可正確辨識', testNormalizeWeeklyOnlyPrimaryWindow],
+  ['gpt-reserve 每週額度可正確標準化為卡片標題', testNormalizeGptReserveWeeklyLimit],
+  ['gpt-reserve 支援多種額度格式與直接視窗', testNormalizeGptReserveVariousFormats],
   ['缺少或 null 欄位不會讓解析失敗', testNormalizeMissingAndNullWindowFields],
   ['零筆手動重置額度版面限制在最大寬度', testZeroManualResetLayoutCapsAtMaxWidth],
   ['單筆手動重置額度版面限制在最大寬度', testSingleManualResetUsesMaxWidth],

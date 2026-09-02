@@ -223,7 +223,7 @@ codex-reset-checker
 - `GET` 使用額度：`https://chatgpt.com/backend-api/wham/usage`
 - `POST` 使用一筆手動重置額度：`https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume`
 
-上述 `/wham` 路徑皆為 ChatGPT 後端的非公開端點，僅依目前 Codex 用戶端可觀察到的格式處理。GPT-5.3-Codex-Spark 只有在帳號與當次回應包含相應的 `additional_rate_limits` 時才會顯示，不會從一般額度推算 Spark 用量。
+上述 `/wham` 路徑皆為 ChatGPT 後端的非公開端點，僅依目前 Codex 用戶端可觀察到的格式處理。GPT-5.3-Codex-Spark 與 gpt-reserve 只有在帳號與當次回應包含相應的 `additional_rate_limits` 時才會顯示，不會從一般額度推算其用量。
 
 重置 POST 會傳送以下 JSON，其中 UUID 是單次邏輯操作的冪等鍵：
 
@@ -241,7 +241,7 @@ codex-reset-checker
 
 - `primary_window`：目前工作階段。
 - `secondary_window`：每週額度。
-- `additional_rate_limits`：額外的模型專用額度；包含 GPT-5.3-Codex-Spark 時，會顯示其目前工作階段與每週額度。
+- `additional_rate_limits`：額外的模型專用額度；包含 GPT-5.3-Codex-Spark 或 gpt-reserve 時，會顯示其目前工作階段或每週額度。
 - `used_percent`：已使用百分比。
 - `remaining_percent`：依 `100 - used_percent` 計算的剩餘百分比。
 - `limit_window_seconds`、`reset_after_seconds`、`reset_at`：視窗與重置資訊；缺少或無法解析時顯示 `N/A`。

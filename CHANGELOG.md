@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.10.0] - 2026-09-03
+
+### Added
+
+- 支援 `additional_rate_limits` 中的 `gpt-reserve Weekly limit`（GPT Reserve 每週額度），自動識別每週週期並顯示「gpt-reserve 每週用量上限」卡片。
+
 ## [0.9.0] - 2026-08-09
 
 ### Changed
