@@ -73,7 +73,12 @@ function printUsage() {
   --time-format   日期時間顯示格式：local、utc 或 iso（預設 local）
   -t, --exact-time  重設時間直接顯示確切時間，不顯示倒數
   -w, --watch     持續監看；Spacebar 刷新，q 結束
+  -v, --version   顯示版本資訊
   -h, --help      顯示說明`);
+}
+
+function printVersion() {
+  console.log(APP_VERSION);
 }
 
 function getCliOptions(cliArgs) {
@@ -92,6 +97,11 @@ function getCliOptions(cliArgs) {
 
     if (arg === '--help' || arg === '-h') {
       printUsage();
+      process.exit(0);
+    }
+
+    if (arg === '--version' || arg === '-v') {
+      printVersion();
       process.exit(0);
     }
 
@@ -2547,6 +2557,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  APP_VERSION,
   buildApiHeaders,
   buildRoundedBoxLines,
   compareUsageDecrease,
@@ -2570,6 +2581,8 @@ module.exports = {
   normalizeUsageResponse,
   normalizeUsageWindow,
   normalizeResetOutcome,
+  printUsage,
+  printVersion,
   renderOutput,
   requestJson,
   requestJsonRequest,

@@ -160,11 +160,22 @@ codex-reset-checker --watch -t
 
 `--exact-time`（短 flag 為 `-t`）可讓額度卡片的「重設時間」預設直接顯示確切的本機時間（例如 `2026-08-08 11:52 +08:00`），而不是「約 1d 12h 23m 後重設」的倒數表示法；顯示格式仍受 `--time-format` 控制。`--watch` 模式下仍可用滑鼠點擊隨時切換回倒數顯示。
 
+### 查詢版本資訊
+
+```bash
+codex-reset-checker --version
+codex-reset-checker -v
+```
+
+顯示目前的套件版本號並立即結束。
+
 ### 不安裝直接執行
 
 ```bash
 node ./bin/codex-reset-checker.js
 node ./bin/codex-reset-checker.js --auth /path/to/auth.json
+node ./bin/codex-reset-checker.js --version
+node ./bin/codex-reset-checker.js -v
 node ./bin/codex-reset-checker.js --json
 node ./bin/codex-reset-checker.js --reset
 node ./bin/codex-reset-checker.js --reset --force

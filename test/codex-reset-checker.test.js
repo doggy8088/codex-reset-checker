@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('assert');
+const { execFileSync } = require('child_process');
 const EventEmitter = require('events');
 const fs = require('fs');
 const https = require('https');
@@ -558,6 +559,70 @@ async function testResetCliOptions() {
     () => checker.getCliOptions(['--reset', '--force', '--force']),
     /--force 只能指定一次/
   );
+}
+
+async function testVersionCliOptions() {
+  const binPath = path.join(__dirname, '..', 'bin', 'codex-reset-checker.js');
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+
+  assert.strictEqual(checker.APP_VERSION, pkg.version);
+
+  // Unit test for printVersion
+  const originalLog = console.log;
+  let logged = null;
+  console.log = (msg) => {
+    logged = msg;
+  };
+  try {
+    checker.printVersion();
+    assert.strictEqual(logged, pkg.version);
+  } finally {
+    console.log = originalLog;
+  }
+
+  // Unit test for getCliOptions with mock process.exit
+  const originalExit = process.exit;
+  let exitCode = null;
+  logged = null;
+  process.exit = (code) => {
+    exitCode = code;
+    throw new Error('PROCESS_EXIT');
+  };
+  console.log = (msg) => {
+    logged = msg;
+  };
+
+  try {
+    assert.throws(() => checker.getCliOptions(['--version']), /PROCESS_EXIT/);
+    assert.strictEqual(exitCode, 0);
+    assert.strictEqual(logged, pkg.version);
+
+    exitCode = null;
+    logged = null;
+    assert.throws(() => checker.getCliOptions(['-v']), /PROCESS_EXIT/);
+    assert.strictEqual(exitCode, 0);
+    assert.strictEqual(logged, pkg.version);
+  } finally {
+    process.exit = originalExit;
+    console.log = originalLog;
+  }
+
+  // Subprocess execution test
+  const stdoutVersion = execFileSync(process.execPath, [binPath, '--version'], {
+    encoding: 'utf8',
+  });
+  assert.strictEqual(stdoutVersion.trim(), pkg.version);
+
+  const stdoutShort = execFileSync(process.execPath, [binPath, '-v'], {
+    encoding: 'utf8',
+  });
+  assert.strictEqual(stdoutShort.trim(), pkg.version);
+
+  const stdoutHelp = execFileSync(process.execPath, [binPath, '--help'], {
+    encoding: 'utf8',
+  });
+  assert.ok(stdoutHelp.includes('-v, --version'));
+  assert.ok(stdoutHelp.includes('顯示版本資訊'));
 }
 
 async function testTimeFormatCliOptions() {
@@ -1976,6 +2041,7 @@ const tests = [
   ['單筆手動重置額度版面限制在最大寬度', testSingleManualResetUsesMaxWidth],
   ['watch CLI 長短選項皆可解析', testWatchCliOptions],
   ['reset CLI 選項、冪等鍵與互斥組合可正確解析', testResetCliOptions],
+  ['-v 與 --version 選項可輸出版本資訊', testVersionCliOptions],
   ['--time-format 選項可解析並驗證取值', testTimeFormatCliOptions],
   ['--exact-time 預設以確切時間顯示重設時間', testExactTimeFlagRendersExactResetTime],
   ['日期時間依 local/utc/iso 格式顯示', testFormatDateTimeModes],
