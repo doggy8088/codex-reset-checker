@@ -32,7 +32,6 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node-version }}
-          cache: npm
 
       - name: Install dependencies
         run: npm ci
@@ -63,6 +62,7 @@ jobs:
         run: |
           set -euo pipefail
 
+          PACKAGE_NAME="$(node -p "require('./package.json').name")"
           CURRENT_VERSION="$(node -p "require('./package.json').version")"
           PREVIOUS_VERSION=""
 
@@ -73,7 +73,12 @@ jobs:
             )"
           fi
 
-          if [ "$CURRENT_VERSION" != "$PREVIOUS_VERSION" ]; then
+          IS_PUBLISHED="false"
+          if npm view "$PACKAGE_NAME@$CURRENT_VERSION" version >/dev/null 2>&1; then
+            IS_PUBLISHED="true"
+          fi
+
+          if [ "$CURRENT_VERSION" != "$PREVIOUS_VERSION" ] || [ "$IS_PUBLISHED" != "true" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -81,6 +86,7 @@ jobs:
 
           echo "Previous package version: ${PREVIOUS_VERSION:-not found}"
           echo "Current package version: $CURRENT_VERSION"
+          echo "Is published on npm: $IS_PUBLISHED"
 
   release:
     name: Publish npm package and GitHub Release
