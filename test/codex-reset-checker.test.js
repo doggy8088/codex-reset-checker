@@ -2031,6 +2031,107 @@ async function testNoCreditsBoxCapsAtMaxWidth() {
   }
 }
 
+async function testManualResetCardsConsistentWidth() {
+  const stripAnsi = (line) => line.replace(/\x1b\[[0-9;]*m/g, '');
+  const displayWidth = (line) => {
+    let width = 0;
+    for (const char of stripAnsi(line)) {
+      const codePoint = char.codePointAt(0);
+      const isWideChar =
+        (codePoint >= 0x1100 && codePoint <= 0x115f) ||
+        (codePoint >= 0x2e80 && codePoint <= 0xa4cf) ||
+        (codePoint >= 0xac00 && codePoint <= 0xd7a3) ||
+        (codePoint >= 0xf900 && codePoint <= 0xfaff) ||
+        (codePoint >= 0xfe10 && codePoint <= 0xfe19) ||
+        (codePoint >= 0xfe30 && codePoint <= 0xfe6f) ||
+        (codePoint >= 0xff00 && codePoint <= 0xff60) ||
+        (codePoint >= 0xffe0 && codePoint <= 0xffe6) ||
+        (codePoint >= 0x20000 && codePoint <= 0x2fffd) ||
+        (codePoint >= 0x30000 && codePoint <= 0x3fffd);
+      width += isWideChar ? 2 : 1;
+    }
+    return width;
+  };
+
+  const dummyCredits = [
+    {
+      status: 'available',
+      granted_at: '2026-08-22 07:23 +08:00',
+      expires_at: '2026-09-21 07:23 +08:00',
+    },
+    {
+      status: 'available',
+      granted_at: '2026-09-04 13:01 +08:00',
+      expires_at: '2026-10-04 13:01 +08:00',
+    },
+  ];
+
+  const layout = checker.getManualResetLayout(dummyCredits);
+  layout.cards.forEach((card, ci) => {
+    const expectedWidth = displayWidth(card.lines[0]);
+    card.lines.forEach((line, li) => {
+      assert.strictEqual(
+        displayWidth(line),
+        expectedWidth,
+        `第 ${ci + 1} 張額度卡片第 ${li + 1} 列寬度應與邊框寬度一致`
+      );
+    });
+  });
+
+  const dummyUsage = {
+    primary_window: {
+      name: '目前工作階段',
+      used_percent: 0,
+      remaining_percent: 100,
+      reset_at: 1788552420,
+    },
+    secondary_window: {
+      name: '每週額度',
+      used_percent: 33,
+      remaining_percent: 67,
+      reset_at: 1788734760,
+    },
+  };
+
+  const logs = [];
+  const originalLog = console.log;
+  console.log = (value = '') => logs.push(String(value));
+  try {
+    checker.renderOutput(
+      { items: dummyCredits },
+      dummyUsage,
+      { plan_type: 'plus' },
+      null,
+      { account_plan: { subscription_expires_at_timestamp: 1788901920 } },
+      { json: false, timeFormat: 'local', exactTime: false, renderState: null }
+    );
+  } finally {
+    console.log = originalLog;
+  }
+
+  const boxEdges = logs.filter(
+    (line) => line.startsWith('┌') || line.startsWith('└') || line.startsWith('╭') || line.startsWith('╰')
+  );
+  assert.ok(boxEdges.length >= 8);
+  const expectedOuterWidth = displayWidth(boxEdges[0]);
+  logs.forEach((line, idx) => {
+    const stripped = stripAnsi(line);
+    if (
+      stripped.startsWith('│') ||
+      stripped.startsWith('╭') ||
+      stripped.startsWith('╰') ||
+      stripped.startsWith('┌') ||
+      stripped.startsWith('└')
+    ) {
+      assert.strictEqual(
+        displayWidth(line),
+        expectedOuterWidth,
+        `第 ${idx + 1} 行輸出寬度應與卡片外框一致（不破版）`
+      );
+    }
+  });
+}
+
 const tests = [
   ['完整使用額度回應可標準化', testNormalizeCompleteUsage],
   ['只有 primary window 的每週額度可正確辨識', testNormalizeWeeklyOnlyPrimaryWindow],
@@ -2039,6 +2140,7 @@ const tests = [
   ['缺少或 null 欄位不會讓解析失敗', testNormalizeMissingAndNullWindowFields],
   ['零筆手動重置額度版面限制在最大寬度', testZeroManualResetLayoutCapsAtMaxWidth],
   ['單筆手動重置額度版面限制在最大寬度', testSingleManualResetUsesMaxWidth],
+  ['手動重置卡片各列寬度一致不破版', testManualResetCardsConsistentWidth],
   ['watch CLI 長短選項皆可解析', testWatchCliOptions],
   ['reset CLI 選項、冪等鍵與互斥組合可正確解析', testResetCliOptions],
   ['-v 與 --version 選項可輸出版本資訊', testVersionCliOptions],

@@ -1428,7 +1428,12 @@ function parseStatusMood(status) {
 }
 
 function buildCreditLine(prefix, content, width = CREDIT_WIDTH) {
-  const text = `${prefix}${String(content || '')}`;
+  if (width === undefined && typeof content === 'number') {
+    width = content;
+    content = prefix;
+    prefix = '';
+  }
+  const text = `${prefix || ''}${String(content || '')}`;
   const visibleLen = textDisplayWidth(text);
   const padding = Math.max(0, width - visibleLen);
   return `│ ${text}${' '.repeat(padding)} │`;
@@ -1492,7 +1497,7 @@ function buildCreditCardLines(lines, contentWidth = CREDIT_WIDTH) {
 
   return [
     paint('bold', top),
-    ...lines.map((line) => buildCreditLine(' ', line, safeWidth)),
+    ...lines.map((line) => buildCreditLine('', line, safeWidth)),
     paint('bold', bottom),
   ];
 }
