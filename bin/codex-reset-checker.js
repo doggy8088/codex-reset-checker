@@ -11,6 +11,8 @@ const RATE_LIMIT_API_URL = 'https://chatgpt.com/backend-api/wham/rate-limit-rese
 const RESET_CONSUME_API_URL =
   'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume';
 const USAGE_API_URL = 'https://chatgpt.com/backend-api/wham/usage';
+const GPT_RESERVE_HELP_URL =
+  'https://help.openai.com/zh-hant/articles/20001499-luna-reserve-in-codex-and-chatgpt-work';
 
 const COLOR = process.stdout && process.stdout.isTTY && !process.env.NO_COLOR;
 const CREDIT_WIDTH = 54;
@@ -1162,6 +1164,36 @@ function getUsageCardTitle(label, windowType) {
   return `${label} ${suffix}`;
 }
 
+function supportsTerminalHyperlinks(output = process.stdout, environment = process.env) {
+  return Boolean(output && output.isTTY && environment.TERM !== 'dumb');
+}
+
+function formatUsageCardTitle(
+  title,
+  hyperlinksEnabled = supportsTerminalHyperlinks(),
+  colorsEnabled = COLOR
+) {
+  const text = String(title);
+  const match = /\bgpt-reserve\b/.exec(text);
+  const dim = (value) => colorsEnabled && value
+    ? `\x1b[2m${value}\x1b[0m`
+    : value;
+
+  if (!hyperlinksEnabled || !match) {
+    return dim(text);
+  }
+
+  const before = text.slice(0, match.index);
+  const after = text.slice(match.index + match[0].length);
+  const hyperlink = `\x1b]8;;${GPT_RESERVE_HELP_URL}\x1b\\gpt-reserve\x1b]8;;\x1b\\`;
+  // 使用可由終端機主題重新映射的 ANSI 色盤，避免固定 RGB 在深色或淺色主題失去對比。
+  const linkedLabel = colorsEnabled
+    ? `\x1b[36;4m${hyperlink}\x1b[0m`
+    : hyperlink;
+
+  return `${dim(before)}${linkedLabel}${dim(after)}`;
+}
+
 function centerText(value, width) {
   const text = String(value);
   const padding = Math.max(0, width - textDisplayWidth(text));
@@ -1194,7 +1226,7 @@ function buildUsageCardLines(title, window, contentWidth = USAGE_CARD_WIDTH, dis
     .replace(/^重置時間：/, '')
     .replace(/重置$/, '重設');
   const contentLines = [
-    paint('dim', title),
+    formatUsageCardTitle(title, displayOptions.hyperlinks, displayOptions.colors),
     `${paint(color, remaining)} ${paint('dim', '剩餘')} ${paint('gray', `・已使用 ${used}`)}`,
     buildUsageProgressBar(
       window.remaining_percent,
@@ -1440,7 +1472,9 @@ function buildCreditLine(prefix, content, width = CREDIT_WIDTH) {
 }
 
 function stripAnsi(value) {
-  return String(value).replace(/\x1b\[[0-9;]*m/g, '');
+  return String(value)
+    .replace(/\x1b\]8;;[^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+    .replace(/\x1b\[[0-9;]*m/g, '');
 }
 
 function textDisplayWidth(value) {
@@ -2193,6 +2227,10 @@ function renderOutput(result, usage, usageRaw, usageError, accountStatus, option
     timeFormat: options.timeFormat || 'local',
     exactTime: Boolean(options.exactTime),
     renderState: options.renderState || null,
+    hyperlinks: options.hyperlinks === undefined
+      ? supportsTerminalHyperlinks()
+      : Boolean(options.hyperlinks),
+    colors: options.colors === undefined ? COLOR : Boolean(options.colors),
   };
   const manualResetLayout = getManualResetLayout(credits, displayOptions);
   const usageCards = getUsageCards(usage);
@@ -2564,6 +2602,7 @@ if (require.main === module) {
 
 module.exports = {
   APP_VERSION,
+  GPT_RESERVE_HELP_URL,
   buildApiHeaders,
   buildRoundedBoxLines,
   compareUsageDecrease,
@@ -2572,6 +2611,7 @@ module.exports = {
   extractMouseEvents,
   formatCompactDurationFromSeconds,
   formatDateTime,
+  formatUsageCardTitle,
   formatUsageReset,
   getAvailableResetCount,
   getCliOptions,
@@ -2599,5 +2639,7 @@ module.exports = {
   runReset,
   sanitizeSensitiveText,
   startWatch,
+  supportsTerminalHyperlinks,
   terminalSizeChanged,
+  textDisplayWidth,
 };

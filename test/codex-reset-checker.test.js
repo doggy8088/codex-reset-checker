@@ -379,6 +379,71 @@ async function testNormalizeGptReserveVariousFormats() {
   assert.strictEqual(dictCards[0].title, 'gpt-reserve 每週用量上限');
 }
 
+async function testGptReserveTerminalHyperlink() {
+  const plainTitle = 'gpt-reserve 每週用量上限';
+  const linkedTitle = checker.formatUsageCardTitle(plainTitle, true, false);
+  const styledTitle = checker.formatUsageCardTitle(plainTitle, true, true);
+  const hyperlink =
+    `\x1b]8;;${checker.GPT_RESERVE_HELP_URL}\x1b\\gpt-reserve\x1b]8;;\x1b\\`;
+
+  assert.strictEqual(
+    linkedTitle,
+    `${hyperlink} 每週用量上限`
+  );
+  assert.strictEqual(
+    styledTitle,
+    `\x1b[36;4m${hyperlink}\x1b[0m\x1b[2m 每週用量上限\x1b[0m`
+  );
+  assert.strictEqual(checker.formatUsageCardTitle(plainTitle, false, false), plainTitle);
+  assert.strictEqual(
+    checker.formatUsageCardTitle('GPT-5.3-Codex-Spark 每週用量上限', true, false),
+    'GPT-5.3-Codex-Spark 每週用量上限'
+  );
+  assert.strictEqual(checker.textDisplayWidth(linkedTitle), checker.textDisplayWidth(plainTitle));
+  assert.strictEqual(checker.textDisplayWidth(styledTitle), checker.textDisplayWidth(plainTitle));
+
+  const lines = [];
+  const originalLog = console.log;
+  console.log = (value = '') => lines.push(String(value));
+  try {
+    checker.renderOutput(
+      { available_count: 0, credits: [] },
+      {
+        primary_window: null,
+        secondary_window: null,
+        additional_rate_limits: [
+          {
+            id: 'gpt-reserve',
+            name: 'gpt-reserve',
+            primary_window: null,
+            secondary_window: {
+              name: '每週額度',
+              used_percent: 10,
+              remaining_percent: 90,
+              reset_after_seconds: 3600,
+              reset_at: null,
+            },
+          },
+        ],
+      },
+      null,
+      null,
+      null,
+      {
+        json: false,
+        timeFormat: 'local',
+        exactTime: false,
+        hyperlinks: true,
+        colors: true,
+      }
+    );
+  } finally {
+    console.log = originalLog;
+  }
+
+  assert.ok(lines.some((line) => line.includes(styledTitle)));
+}
+
 async function testZeroManualResetLayoutCapsAtMaxWidth() {
   const originalColumns = process.stdout.columns;
   process.stdout.columns = 120;
@@ -2173,6 +2238,7 @@ const tests = [
   ['只有 primary window 的每週額度可正確辨識', testNormalizeWeeklyOnlyPrimaryWindow],
   ['gpt-reserve 每週額度可正確標準化為卡片標題', testNormalizeGptReserveWeeklyLimit],
   ['gpt-reserve 支援多種額度格式與直接視窗', testNormalizeGptReserveVariousFormats],
+  ['gpt-reserve 卡片標題包含終端機超連結且維持顯示寬度', testGptReserveTerminalHyperlink],
   ['缺少或 null 欄位不會讓解析失敗', testNormalizeMissingAndNullWindowFields],
   ['零筆手動重置額度版面限制在最大寬度', testZeroManualResetLayoutCapsAtMaxWidth],
   ['單筆手動重置額度版面限制在最大寬度', testSingleManualResetUsesMaxWidth],
