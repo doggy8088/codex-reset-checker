@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bump and Release"
+  short_description: "為本專案升版並透過既有 GitHub Actions 發佈，預設使用 patch"
+  default_prompt: "使用 $bump-and-release 為本專案升版並完成發佈，未指定級別時使用 patch。"
