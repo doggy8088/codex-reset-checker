@@ -1721,13 +1721,14 @@ function getManualResetLayout(credits, displayOptions = {}) {
     ? Math.min(terminalWidth, MAX_LAYOUT_WIDTH)
     : 0;
   let prepared = prepareCreditCards(credits, CREDIT_WIDTH, displayOptions);
-  const naturalCardOuterWidth = prepared.contentWidth + 4;
-  if (prepared.cards.length === 1 && cappedTerminalWidth > naturalCardOuterWidth) {
-    prepared = prepareCreditCards(credits, cappedTerminalWidth - 4, displayOptions);
-  }
-  const cardOuterWidth = prepared.contentWidth + 4;
+  let cardOuterWidth = prepared.contentWidth + 4;
   const twoColumns =
     prepared.cards.length >= 2 && cappedTerminalWidth >= cardOuterWidth * 2 + CREDIT_GAP;
+  // Stacked credits still share the available page width with the usage section.
+  if (!twoColumns && prepared.cards.length > 0 && cappedTerminalWidth > cardOuterWidth) {
+    prepared = prepareCreditCards(credits, cappedTerminalWidth - 4, displayOptions);
+    cardOuterWidth = prepared.contentWidth + 4;
+  }
   const totalWidth = twoColumns
     ? cardOuterWidth * 2 + CREDIT_GAP
     : prepared.cards.length === 0 && cappedTerminalWidth > 0

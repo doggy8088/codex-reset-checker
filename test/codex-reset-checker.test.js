@@ -436,6 +436,41 @@ async function testSingleManualResetUsesMaxWidth() {
   }
 }
 
+async function testMultipleCreditsResponsiveLayout() {
+  const originalColumns = process.stdout.columns;
+  const credits = Array.from({ length: 2 }, () => ({
+    status: 'available',
+    granted_at: '2026-07-13T00:00:00Z',
+    expires_at: '2026-08-13T00:00:00Z',
+  }));
+  try {
+    for (const columns of [80, 100, 160]) {
+      process.stdout.columns = columns;
+      for (const exactTime of [false, true]) {
+        const lines = [];
+        const originalLog = console.log;
+        console.log = (value = '') => lines.push(String(value));
+        try {
+          checker.renderOutput(
+            { credits }, checker.normalizeUsageResponse(usageResponse()),
+            null, null, null, { exactTime, timeFormat: 'local' }
+          );
+        } finally {
+          console.log = originalLog;
+        }
+        const tops = lines.filter((line) => line.startsWith('╭'));
+        assert.ok(tops.length > 0);
+        assert.strictEqual(tops.some((line) => line.includes('╮  ╭')), columns >= 100,
+          `${columns} 欄、exactTime=${exactTime} 的用量卡片排列`);
+        assert.strictEqual(tops[0].length, Math.min(columns, 100));
+      }
+    }
+  } finally {
+    if (originalColumns === undefined) delete process.stdout.columns;
+    else process.stdout.columns = originalColumns;
+  }
+}
+
 async function testWatchCliOptions() {
   const longOption = checker.getCliOptions(['--watch', '--auth', '/tmp/auth.json']);
   const shortOption = checker.getCliOptions(['-w', '/tmp/short-auth.json']);
@@ -2133,6 +2168,7 @@ async function testManualResetCardsConsistentWidth() {
 }
 
 const tests = [
+  ['多筆重置額度不壓縮用量區且依終端寬度切換欄數', testMultipleCreditsResponsiveLayout],
   ['完整使用額度回應可標準化', testNormalizeCompleteUsage],
   ['只有 primary window 的每週額度可正確辨識', testNormalizeWeeklyOnlyPrimaryWindow],
   ['gpt-reserve 每週額度可正確標準化為卡片標題', testNormalizeGptReserveWeeklyLimit],
