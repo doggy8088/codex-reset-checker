@@ -1339,6 +1339,25 @@ function printUsageCards(cards, layout = getUsageLayout(cards), displayOptions =
   return printedLines;
 }
 
+// 卡片顯示順序：gpt-reserve 緊接在主要額度之後，其餘（例如 Spark）依原始順序排在最後。
+const ADDITIONAL_RATE_LIMIT_DISPLAY_ORDER = ['gpt-reserve', 'GPT-5.3-Codex-Spark'];
+
+function getAdditionalRateLimitDisplayRank(limit) {
+  const index = ADDITIONAL_RATE_LIMIT_DISPLAY_ORDER.indexOf(limit && limit.name);
+  return index === -1 ? ADDITIONAL_RATE_LIMIT_DISPLAY_ORDER.length : index;
+}
+
+function sortAdditionalRateLimitsForDisplay(limits) {
+  return limits
+    .map((limit, index) => ({ limit, index }))
+    .sort((a, b) => {
+      const rankDiff = getAdditionalRateLimitDisplayRank(a.limit)
+        - getAdditionalRateLimitDisplayRank(b.limit);
+      return rankDiff !== 0 ? rankDiff : a.index - b.index;
+    })
+    .map((entry) => entry.limit);
+}
+
 function getUsageCards(usage) {
   if (!usage) {
     return [];
@@ -1362,7 +1381,7 @@ function getUsageCards(usage) {
   }
 
   const additionalRateLimits = Array.isArray(usage.additional_rate_limits)
-    ? usage.additional_rate_limits
+    ? sortAdditionalRateLimitsForDisplay(usage.additional_rate_limits)
     : [];
   additionalRateLimits.forEach((limit) => {
     if (limit.primary_window) {

@@ -330,6 +330,60 @@ async function testNormalizeGptReserveWeeklyLimit() {
   assert.strictEqual(cards[2].title, 'gpt-reserve 每週用量上限');
 }
 
+async function testUsageCardOrderPutsGptReserveBeforeSpark() {
+  const normalized = checker.normalizeUsageResponse({
+    rate_limit: {
+      primary_window: null,
+      secondary_window: {
+        used_percent: 100,
+        limit_window_seconds: 604800,
+        reset_after_seconds: 300000,
+        reset_at: 1784504427,
+      },
+    },
+    additional_rate_limits: [
+      {
+        limit_name: 'GPT-5.3-Codex-Spark',
+        rate_limit: {
+          primary_window: {
+            used_percent: 15,
+            limit_window_seconds: 18000,
+            reset_after_seconds: 7200,
+            reset_at: 1784500000,
+          },
+          secondary_window: {
+            used_percent: 7,
+            limit_window_seconds: 604800,
+            reset_after_seconds: 510000,
+            reset_at: 1784504432,
+          },
+        },
+      },
+      {
+        limit_name: 'gpt-reserve',
+        primary_window: {
+          used_percent: 4,
+          limit_window_seconds: 604800,
+          reset_after_seconds: 400000,
+          reset_at: 1784504435,
+        },
+        secondary_window: null,
+      },
+    ],
+  });
+
+  const cards = checker.getUsageCards(normalized);
+  assert.deepStrictEqual(
+    cards.map((card) => checker.formatUsageCardTitle(card.title, false, false)),
+    [
+      '每週用量上限',
+      'gpt-reserve 每週用量上限',
+      'GPT-5.3-Codex-Spark 5 小時使用情況限制',
+      'GPT-5.3-Codex-Spark 每週用量上限',
+    ]
+  );
+}
+
 async function testNormalizeGptReserveVariousFormats() {
   const directNormalized = checker.normalizeUsageResponse({
     rate_limit: {
@@ -2237,6 +2291,7 @@ const tests = [
   ['完整使用額度回應可標準化', testNormalizeCompleteUsage],
   ['只有 primary window 的每週額度可正確辨識', testNormalizeWeeklyOnlyPrimaryWindow],
   ['gpt-reserve 每週額度可正確標準化為卡片標題', testNormalizeGptReserveWeeklyLimit],
+  ['用量卡片順序：gpt-reserve 排在 Spark 之前', testUsageCardOrderPutsGptReserveBeforeSpark],
   ['gpt-reserve 支援多種額度格式與直接視窗', testNormalizeGptReserveVariousFormats],
   ['gpt-reserve 卡片標題包含終端機超連結且維持顯示寬度', testGptReserveTerminalHyperlink],
   ['缺少或 null 欄位不會讓解析失敗', testNormalizeMissingAndNullWindowFields],

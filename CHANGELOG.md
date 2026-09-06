@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.1] - 2026-09-07
+
+### Fixed
+
+- 修正同時存在 `gpt-reserve` 與 `GPT-5.3-Codex-Spark` 額度時的卡片順序，讓 `gpt-reserve` 緊接主要額度顯示，Spark 額度則依序排列在後。
+
 ## [1.0.0] - 2026-09-05
 
 ### Added
